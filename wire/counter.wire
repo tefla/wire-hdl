@@ -1,0 +1,13 @@
+; 4-bit binary counter
+; Counts from 0 to 15 and wraps around
+; Outputs the count on a 4-bit bus
+
+module counter4(clk, reset) -> count:4:
+  ; Increment logic: count + 1
+  inc = adder4(count, 1, 0)
+
+  ; If reset, load 0, otherwise load incremented value
+  next = mux4(reset, inc.sum, 0)
+
+  ; Store in flip-flops
+  count = dff4(next, clk)

@@ -1,0 +1,16 @@
+; 16-bit 2-to-1 Multiplexer
+; Selects between two 16-bit inputs based on selector bit
+; If sel=0: out = a
+; If sel=1: out = b
+;
+; Implementation: Use two 8-bit muxes, one for each byte
+
+module mux16(a:16, b:16, sel) -> out:16:
+  ; Mux low byte (bits 0-7)
+  low_out = mux8(a[0:7], b[0:7], sel)
+
+  ; Mux high byte (bits 8-15)
+  high_out = mux8(a[8:15], b[8:15], sel)
+
+  ; Concatenate high and low bytes
+  out = concat(high_out, low_out)

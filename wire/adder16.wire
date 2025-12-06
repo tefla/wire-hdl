@@ -1,0 +1,24 @@
+; 16-bit Adder
+; Adds two 16-bit numbers with carry-in, produces sum and carry-out
+;
+; Implementation: Chain two 8-bit adders
+;   - Low byte: adder8(a[0:7], b[0:7], cin)
+;   - High byte: adder8(a[8:15], b[8:15], carry_from_low)
+;   - Final sum: concat(high_sum, low_sum)
+
+module adder16(a:16, b:16, cin) -> (sum:16, cout):
+  ; Add low bytes (bits 0-7) with carry-in
+  low_result = adder8(a[0:7], b[0:7], cin)
+  low_sum = low_result.sum
+  low_carry = low_result.cout
+
+  ; Add high bytes (bits 8-15) with carry from low byte
+  high_result = adder8(a[8:15], b[8:15], low_carry)
+  high_sum = high_result.sum
+  high_carry = high_result.cout
+
+  ; Concatenate high and low sums (high byte first)
+  sum = concat(high_sum, low_sum)
+
+  ; Final carry out
+  cout = high_carry

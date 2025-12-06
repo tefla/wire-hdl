@@ -1,0 +1,21 @@
+; 4-Way 8-bit Multiplexer
+; Selects one of four 8-bit inputs based on 2-bit selector
+;
+; sel:2 = 00 -> out = a
+; sel:2 = 01 -> out = b
+; sel:2 = 10 -> out = c
+; sel:2 = 11 -> out = d
+;
+; Implementation: Two-level mux tree using mux8
+
+module mux4way8(a:8, b:8, c:8, d:8, sel:2) -> out:8:
+  ; First level: select based on sel[0]
+  ; sel[0]=0 -> ab=a, cd=c
+  ; sel[0]=1 -> ab=b, cd=d
+  ab = mux8(a, b, sel[0])
+  cd = mux8(c, d, sel[0])
+
+  ; Second level: select based on sel[1]
+  ; sel[1]=0 -> out=ab
+  ; sel[1]=1 -> out=cd
+  out = mux8(ab, cd, sel[1])

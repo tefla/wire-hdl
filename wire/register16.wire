@@ -1,0 +1,14 @@
+; 16-bit CPU Components
+; Extended registers and arithmetic for CPU implementation
+
+; 16-bit register with enable
+; When en=1, latches d on rising clock edge
+; When en=0, holds previous value
+module register16(d:16, en, clk) -> q:16:
+  ; Split into two 8-bit registers
+  ; Lower byte (bits 0-7)
+  q_lo = register8(d[0:7], en, clk)
+  ; Upper byte (bits 8-15)
+  q_hi = register8(d[8:15], en, clk)
+  ; Concatenate back to 16-bit (high byte first)
+  q = concat(q_hi, q_lo)

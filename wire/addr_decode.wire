@@ -1,0 +1,58 @@
+; Address Decoder
+; Decodes 16-bit address to select memory regions
+;
+; Memory Map:
+;   $0000-$00FF  Zero Page RAM (256 bytes)
+;   $0100-$01FF  Stack RAM (256 bytes)
+;   $0200-$3FFF  General RAM (~16KB)
+;   $4000-$7FFF  [Reserved/Expansion]
+;   $8000-$800F  I/O Registers
+;   $C000-$FFFF  ROM (16KB)
+
+module addr_decode(addr:16) -> (sel_zp, sel_stack, sel_ram, sel_io, sel_rom):
+  ; Individual address bits (using bracket notation which works)
+  a15 = addr[15]
+  a14 = addr[14]
+  a13 = addr[13]
+  a12 = addr[12]
+  a11 = addr[11]
+  a10 = addr[10]
+  a9 = addr[9]
+  a8 = addr[8]
+
+  ; Check if high byte is zero (for ZP detection)
+  ; All of a15..a8 must be 0
+  hi_any = or(a15, or(a14, or(a13, or(a12, or(a11, or(a10, or(a9, a8)))))))
+  hi_is_00 = not(hi_any)
+
+  ; Check if high byte is $01 (for stack detection)
+  ; a8=1, all others 0
+  hi_others = or(a15, or(a14, or(a13, or(a12, or(a11, or(a10, a9))))))
+  hi_is_01 = and(not(hi_others), a8)
+
+  ; Zero Page: $0000-$00FF (high byte = $00)
+  sel_zp = hi_is_00
+
+  ; Stack: $0100-$01FF (high byte = $01)
+  sel_stack = hi_is_01
+
+  ; ROM: $C000-$FFFF (A15=1 AND A14=1)
+  sel_rom = and(a15, a14)
+
+  ; I/O: $8000-$80FF (high byte = $80)
+  ; A15=1, A14=0, A13=0, A12=0, A11=0, A10=0, A9=0, A8=0
+  not_a14 = not(a14)
+  not_a13 = not(a13)
+  not_a12 = not(a12)
+  not_a11 = not(a11)
+  not_a10 = not(a10)
+  not_a9 = not(a9)
+  not_a8 = not(a8)
+  hi_is_80 = and(a15, and(not_a14, and(not_a13, and(not_a12, and(not_a11, and(not_a10, and(not_a9, not_a8)))))))
+  sel_io = hi_is_80
+
+  ; General RAM: $0200-$3FFF (A15=0, A14=0, but not ZP or Stack)
+  not_a15 = not(a15)
+  low_region = and(not_a15, not_a14)
+  not_zp_or_stack = nor(sel_zp, sel_stack)
+  sel_ram = and(low_region, not_zp_or_stack)

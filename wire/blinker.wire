@@ -1,0 +1,5 @@
+; Simple blinker - toggles LED on each clock
+; Good for testing, demonstrates basic sequential logic
+
+module simple_blinker(clk) -> led:
+  led = dff(not(led), clk)

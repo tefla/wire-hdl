@@ -1,0 +1,20 @@
+; 8-bit 2-to-1 Multiplexer
+; Selects between two 8-bit inputs based on selector bit
+; If sel=0: out = a
+; If sel=1: out = b
+;
+; Implementation: Use 1-bit mux for each bit, concatenate results
+
+module mux8(a:8, b:8, sel) -> out:8:
+  ; Mux each bit
+  bit0 = mux(a[0], b[0], sel)
+  bit1 = mux(a[1], b[1], sel)
+  bit2 = mux(a[2], b[2], sel)
+  bit3 = mux(a[3], b[3], sel)
+  bit4 = mux(a[4], b[4], sel)
+  bit5 = mux(a[5], b[5], sel)
+  bit6 = mux(a[6], b[6], sel)
+  bit7 = mux(a[7], b[7], sel)
+
+  ; Concatenate bits (high to low)
+  out = concat(bit7, bit6, bit5, bit4, bit3, bit2, bit1, bit0)

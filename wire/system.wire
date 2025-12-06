@@ -1,0 +1,37 @@
+; System Module
+; Combines CPU with address decoder for ROM-based architecture
+;
+; Memory is handled externally (in the simulator/test harness):
+;   - ROM ($C000-$FFFF): Read-only, preloaded with firmware
+;   - RAM ($0000-$3FFF): Read-write (ZP, Stack, General)
+;   - I/O ($8000-$800F): Memory-mapped I/O registers
+;
+; The system module provides chip-select signals to route
+; data_in from the appropriate memory source.
+
+module system(clk, reset, data_in:8) -> (addr:16, data_out:8, mem_write, halted, sel_zp, sel_stack, sel_ram, sel_io, sel_rom, a_out:8, x_out:8, y_out:8, sp_out:8, flags_out:4, pc_out:16, state_out:5):
+  ; Instantiate the CPU
+  cpu = cpu_minimal(clk, reset, data_in)
+
+  ; Instantiate the address decoder
+  decode = addr_decode(cpu.addr)
+
+  ; Pass through CPU outputs
+  addr = cpu.addr
+  data_out = cpu.data_out
+  mem_write = cpu.mem_write
+  halted = cpu.halted
+  a_out = cpu.a_out
+  x_out = cpu.x_out
+  y_out = cpu.y_out
+  sp_out = cpu.sp_out
+  flags_out = cpu.flags_out
+  pc_out = cpu.pc_out
+  state_out = cpu.state_out
+
+  ; Pass through address decoder outputs (chip selects)
+  sel_zp = decode.sel_zp
+  sel_stack = decode.sel_stack
+  sel_ram = decode.sel_ram
+  sel_io = decode.sel_io
+  sel_rom = decode.sel_rom

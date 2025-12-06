@@ -1,0 +1,85 @@
+; Wire Standard Library - Registers
+; Sequential logic built from DFF primitives
+
+; 1-bit register with enable
+; When en=1, latches d on rising clock edge
+; When en=0, holds previous value
+module register(d, en, clk) -> q:
+  ; Mux between current output and new input based on enable
+  feedback = mux(q, d, en)
+  q = dff(feedback, clk)
+
+; 8-bit register with enable
+module register8(d:8, en, clk) -> q:8:
+  q0 = register(d[0], en, clk)
+  q1 = register(d[1], en, clk)
+  q2 = register(d[2], en, clk)
+  q3 = register(d[3], en, clk)
+  q4 = register(d[4], en, clk)
+  q5 = register(d[5], en, clk)
+  q6 = register(d[6], en, clk)
+  q7 = register(d[7], en, clk)
+  q = concat(q7, q6, q5, q4, q3, q2, q1, q0)
+
+; Simple D flip-flop wrapper (always captures)
+module dff_simple(d, clk) -> q:
+  q = dff(d, clk)
+
+; 4-bit D flip-flop (always captures)
+module dff4(d:4, clk) -> q:4:
+  q0 = dff(d[0], clk)
+  q1 = dff(d[1], clk)
+  q2 = dff(d[2], clk)
+  q3 = dff(d[3], clk)
+  q = concat(q3, q2, q1, q0)
+
+; 8-bit D flip-flop (always captures)
+module dff8(d:8, clk) -> q:8:
+  q0 = dff(d[0], clk)
+  q1 = dff(d[1], clk)
+  q2 = dff(d[2], clk)
+  q3 = dff(d[3], clk)
+  q4 = dff(d[4], clk)
+  q5 = dff(d[5], clk)
+  q6 = dff(d[6], clk)
+  q7 = dff(d[7], clk)
+  q = concat(q7, q6, q5, q4, q3, q2, q1, q0)
+
+; SR latch (set-reset) using NAND gates
+; Warning: S=R=1 is an invalid state
+module sr_latch(s, r) -> (q, qn):
+  q = nand(s, qn)
+  qn = nand(r, q)
+
+; 1-bit counter (toggle flip-flop)
+module counter1(en, clk) -> q:
+  next = xor(q, en)
+  q = dff(next, clk)
+
+; 8-bit counter with enable
+module counter8(en, clk) -> q:8:
+  ; Bit 0 toggles when enabled
+  q0 = counter1(en, clk)
+  ; Bit 1 toggles when bit 0 and enable
+  e1 = and(en, q0)
+  q1 = counter1(e1, clk)
+  ; Bit 2 toggles when bits 0,1 and enable
+  e2 = and3(en, q0, q1)
+  q2 = counter1(e2, clk)
+  ; Continue pattern...
+  c01 = and(q0, q1)
+  e3 = and3(en, c01, q2)
+  q3 = counter1(e3, clk)
+  c012 = and(c01, q2)
+  e4 = and3(en, c012, q3)
+  q4 = counter1(e4, clk)
+  c0123 = and(c012, q3)
+  e5 = and3(en, c0123, q4)
+  q5 = counter1(e5, clk)
+  c01234 = and(c0123, q4)
+  e6 = and3(en, c01234, q5)
+  q6 = counter1(e6, clk)
+  c012345 = and(c01234, q5)
+  e7 = and3(en, c012345, q6)
+  q7 = counter1(e7, clk)
+  q = concat(q7, q6, q5, q4, q3, q2, q1, q0)

@@ -1,0 +1,99 @@
+; Wire Standard Library - Arithmetic Modules
+; Depends on gates.wire
+
+; Half adder - adds two 1-bit numbers
+; sum = a XOR b, carry = a AND b
+module half_adder(a, b) -> (sum, carry):
+  sum = xor(a, b)
+  carry = and(a, b)
+
+; Full adder - adds two 1-bit numbers with carry in
+; sum = a XOR b XOR cin
+; cout = (a AND b) OR (cin AND (a XOR b))
+module full_adder(a, b, cin) -> (sum, cout):
+  ab_xor = xor(a, b)
+  sum = xor(ab_xor, cin)
+  ab_and = and(a, b)
+  cin_ab = and(cin, ab_xor)
+  cout = or(ab_and, cin_ab)
+
+; 4-bit ripple carry adder
+module adder4(a:4, b:4, cin) -> (sum:4, cout):
+  ; Bit 0
+  ha0 = full_adder(a[0], b[0], cin)
+  s0 = ha0.sum
+  c0 = ha0.cout
+
+  ; Bit 1
+  ha1 = full_adder(a[1], b[1], c0)
+  s1 = ha1.sum
+  c1 = ha1.cout
+
+  ; Bit 2
+  ha2 = full_adder(a[2], b[2], c1)
+  s2 = ha2.sum
+  c2 = ha2.cout
+
+  ; Bit 3
+  ha3 = full_adder(a[3], b[3], c2)
+  s3 = ha3.sum
+  cout = ha3.cout
+
+  ; Concatenate sum bits (high to low)
+  sum = concat(s3, s2, s1, s0)
+
+; 8-bit ripple carry adder
+module adder8(a:8, b:8, cin) -> (sum:8, cout):
+  ; Bit 0
+  ha0 = full_adder(a[0], b[0], cin)
+  s0 = ha0.sum
+  c0 = ha0.cout
+
+  ; Bit 1
+  ha1 = full_adder(a[1], b[1], c0)
+  s1 = ha1.sum
+  c1 = ha1.cout
+
+  ; Bit 2
+  ha2 = full_adder(a[2], b[2], c1)
+  s2 = ha2.sum
+  c2 = ha2.cout
+
+  ; Bit 3
+  ha3 = full_adder(a[3], b[3], c2)
+  s3 = ha3.sum
+  c3 = ha3.cout
+
+  ; Bit 4
+  ha4 = full_adder(a[4], b[4], c3)
+  s4 = ha4.sum
+  c4 = ha4.cout
+
+  ; Bit 5
+  ha5 = full_adder(a[5], b[5], c4)
+  s5 = ha5.sum
+  c5 = ha5.cout
+
+  ; Bit 6
+  ha6 = full_adder(a[6], b[6], c5)
+  s6 = ha6.sum
+  c6 = ha6.cout
+
+  ; Bit 7
+  ha7 = full_adder(a[7], b[7], c6)
+  s7 = ha7.sum
+  cout = ha7.cout
+
+  ; Concatenate sum bits (high to low)
+  sum = concat(s7, s6, s5, s4, s3, s2, s1, s0)
+
+; 8-bit subtractor using two's complement
+; result = a - b = a + (~b) + 1
+module sub8(a:8, b:8) -> (diff:8, borrow):
+  ; Invert b
+  nb = nand(b, b)
+  ; Add with carry-in of 1 for two's complement
+  result = adder8(a, nb, 1)
+  diff = result.sum
+  ; Borrow is inverted carry out
+  borrow = nand(result.cout, result.cout)

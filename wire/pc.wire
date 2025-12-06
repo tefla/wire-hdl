@@ -1,0 +1,33 @@
+; 16-bit Program Counter
+; Supports load and increment operations
+;
+; Inputs:
+;   clk     - Clock signal
+;   reset   - Reset PC to 0
+;   load    - Load PC from din
+;   inc     - Increment PC by 1
+;   din:16  - Data input for loads
+;
+; Outputs:
+;   out:16  - Current PC value
+;
+; Priority: reset > load > inc > hold
+
+module pc(clk, reset, load, inc, din:16) -> out:16:
+  ; Calculate next value based on operation
+  ; inc_result = current + 1
+  inc_result = inc16(out)
+
+  ; Select between hold, increment, and load
+  ; If inc=1, use inc_result, else use current (hold)
+  after_inc = mux16(out, inc_result, inc)
+
+  ; If load=1, use din, else use after_inc
+  after_load = mux16(after_inc, din, load)
+
+  ; If reset=1, use 0, else use after_load
+  zero = concat(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+  next_value = mux16(after_load, zero, reset)
+
+  ; Always enable register - we always update (hold, inc, load, or reset)
+  out = register16(next_value, 1, clk)

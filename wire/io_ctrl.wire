@@ -1,0 +1,84 @@
+; I/O Controller
+; Memory-mapped I/O at $8000-$800F
+;
+; Register Map:
+;   $8000 SERIAL_STATUS (R)   - Bit 0: RX ready, Bit 1: TX busy
+;   $8001 SERIAL_DATA   (R/W) - Read: RX byte, Write: TX byte
+;   $8002 LED_CTRL      (W)   - LED on/off control
+;   $8003 TIMER_LO      (R)   - Timer low byte (optional)
+;   $8004 TIMER_HI      (R)   - Timer high byte (optional)
+;
+; Inputs:
+;   clk        - System clock
+;   reset      - Reset signal
+;   addr:4     - Low 4 bits of address (register select)
+;   data_in:8  - Data from CPU for writes
+;   write_en   - Write enable from CPU
+;   read_en    - Read enable from CPU
+;   rx_byte:8  - Received byte from external serial
+;   rx_valid   - RX byte valid strobe
+;   tx_ack     - TX acknowledged (external consumed byte)
+;
+; Outputs:
+;   data_out:8 - Data to CPU for reads
+;   tx_byte:8  - Byte to transmit
+;   tx_valid   - TX byte valid strobe
+;   led_out    - LED state
+
+module io_ctrl(clk, reset, addr:4, data_in:8, write_en, read_en, rx_byte:8, rx_valid, tx_ack) -> (data_out:8, tx_byte:8, tx_valid, led_out):
+  ; Register select decoding
+  ; addr[3:0]: 0=status, 1=data, 2=led, 3=timer_lo, 4=timer_hi
+  is_reg_0 = and(and(and(not(addr[3]), not(addr[2])), not(addr[1])), not(addr[0]))  ; 0000
+  is_reg_1 = and(and(and(not(addr[3]), not(addr[2])), not(addr[1])), addr[0])       ; 0001
+  is_reg_2 = and(and(and(not(addr[3]), not(addr[2])), addr[1]), not(addr[0]))       ; 0010
+
+  ; === TX Logic ===
+  ; When CPU writes to $8001, latch the byte and set tx_pending
+  write_data_reg = and(write_en, is_reg_1)
+
+  ; TX data register - holds byte to transmit
+  tx_data = register8(data_in, write_data_reg, clk)
+  tx_byte = tx_data
+
+  ; TX valid: high for one cycle after write (registered signal)
+  ; Goes high on the clock after write_data_reg was high
+  tx_valid = dff(write_data_reg, clk)
+
+  ; TX busy flag - set on write, clear on ack
+  ; tx_busy_next = (tx_busy OR write_data_reg) AND NOT(tx_ack)
+  tx_busy_raw = dff(tx_busy_next, clk)
+  tx_busy_set = or(tx_busy_raw, write_data_reg)
+  tx_busy_next = and(tx_busy_set, not(tx_ack))
+  tx_busy = tx_busy_raw
+
+  ; === RX Logic ===
+  ; RX buffer - latches incoming byte
+  rx_buffer = register8(rx_byte, rx_valid, clk)
+
+  ; RX ready flag - set on rx_valid, clear on read
+  read_data_reg = and(read_en, is_reg_1)
+  rx_ready_raw = dff(rx_ready_next, clk)
+  rx_ready_set = or(rx_ready_raw, rx_valid)
+  rx_ready_next = and(rx_ready_set, not(read_data_reg))
+  rx_ready = rx_ready_raw
+
+  ; === LED Logic ===
+  ; LED register - written via $8002
+  write_led = and(write_en, is_reg_2)
+  led_reg = dff(led_next, clk)
+  led_next = mux(led_reg, data_in[0], write_led)
+  led_out = led_reg
+
+  ; === Status Register ===
+  ; Bit 0: RX ready, Bit 1: TX busy
+  ; Build status byte: 000000 | tx_busy | rx_ready
+  status_lo = concat(tx_busy, rx_ready)
+  status_byte = concat(0, concat(0, concat(0, concat(0, concat(0, concat(0, status_lo))))))
+
+  ; === Read Mux ===
+  ; Select output based on register address
+  ; reg 0 = status, reg 1 = rx_buffer, others = 0
+  zero8 = concat(0, concat(0, concat(0, concat(0, concat(0, concat(0, concat(0, 0)))))))
+  read_status = mux8(zero8, status_byte, is_reg_0)
+  read_data = mux8(read_status, rx_buffer, is_reg_1)
+  data_out = read_data

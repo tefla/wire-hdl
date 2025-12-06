@@ -1,0 +1,15 @@
+; 16-bit Incrementer
+; Adds 1 to a 16-bit input
+; Used for Program Counter (PC) increment in CPUs
+;
+; Implementation: Use adder16 with b=1, cin=0, only keep sum (ignore cout)
+
+module inc16(in:16) -> out:16:
+  ; Create constant 1 (16-bit)
+  one = 1
+
+  ; Add in + 1
+  result = adder16(in, one, 0)
+
+  ; Extract sum (ignore carry out)
+  out = result.sum

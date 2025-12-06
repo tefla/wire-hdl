@@ -1,0 +1,139 @@
+; Wire Standard Library - Basic Gates
+; All gates built from NAND primitives
+
+; NOT gate - inverts input
+module not(a) -> out:
+  out = nand(a, a)
+
+; AND gate - output high when both inputs high
+module and(a, b) -> out:
+  n = nand(a, b)
+  out = nand(n, n)
+
+; OR gate - output high when either input high
+module or(a, b) -> out:
+  na = nand(a, a)
+  nb = nand(b, b)
+  out = nand(na, nb)
+
+; XOR gate - output high when inputs differ
+module xor(a, b) -> out:
+  n1 = nand(a, b)
+  n2 = nand(a, n1)
+  n3 = nand(b, n1)
+  out = nand(n2, n3)
+
+; NOR gate - output high when both inputs low
+module nor(a, b) -> out:
+  o = or(a, b)
+  out = not(o)
+
+; XNOR gate - output high when inputs match
+module xnor(a, b) -> out:
+  x = xor(a, b)
+  out = not(x)
+
+; 2-to-1 multiplexer - sel=0 selects a, sel=1 selects b
+module mux(a, b, sel) -> out:
+  nsel = not(sel)
+  t0 = and(a, nsel)
+  t1 = and(b, sel)
+  out = or(t0, t1)
+
+; 4-bit NOT gate
+module not4(a:4) -> out:4:
+  out0 = not(a[0])
+  out1 = not(a[1])
+  out2 = not(a[2])
+  out3 = not(a[3])
+  out = concat(out3, out2, out1, out0)
+
+; 4-bit AND gate
+module and4(a:4, b:4) -> out:4:
+  out0 = and(a[0], b[0])
+  out1 = and(a[1], b[1])
+  out2 = and(a[2], b[2])
+  out3 = and(a[3], b[3])
+  out = concat(out3, out2, out1, out0)
+
+; 4-bit OR gate
+module or4(a:4, b:4) -> out:4:
+  out0 = or(a[0], b[0])
+  out1 = or(a[1], b[1])
+  out2 = or(a[2], b[2])
+  out3 = or(a[3], b[3])
+  out = concat(out3, out2, out1, out0)
+
+; 4-bit XOR gate
+module xor4(a:4, b:4) -> out:4:
+  out0 = xor(a[0], b[0])
+  out1 = xor(a[1], b[1])
+  out2 = xor(a[2], b[2])
+  out3 = xor(a[3], b[3])
+  out = concat(out3, out2, out1, out0)
+
+; 4-bit 2-to-1 multiplexer - sel=0 selects a, sel=1 selects b
+module mux4(sel, a:4, b:4) -> out:4:
+  out0 = mux(a[0], b[0], sel)
+  out1 = mux(a[1], b[1], sel)
+  out2 = mux(a[2], b[2], sel)
+  out3 = mux(a[3], b[3], sel)
+  out = concat(out3, out2, out1, out0)
+
+; 3-input AND gate
+module and3(a, b, c) -> out:
+  ab = and(a, b)
+  out = and(ab, c)
+
+; 3-input OR gate
+module or3(a, b, c) -> out:
+  ab = or(a, b)
+  out = or(ab, c)
+
+; 8-bit NOT gate
+module not8(a:8) -> out:8:
+  out0 = not(a[0])
+  out1 = not(a[1])
+  out2 = not(a[2])
+  out3 = not(a[3])
+  out4 = not(a[4])
+  out5 = not(a[5])
+  out6 = not(a[6])
+  out7 = not(a[7])
+  out = concat(out7, out6, out5, out4, out3, out2, out1, out0)
+
+; 8-bit AND gate
+module and8(a:8, b:8) -> out:8:
+  out0 = and(a[0], b[0])
+  out1 = and(a[1], b[1])
+  out2 = and(a[2], b[2])
+  out3 = and(a[3], b[3])
+  out4 = and(a[4], b[4])
+  out5 = and(a[5], b[5])
+  out6 = and(a[6], b[6])
+  out7 = and(a[7], b[7])
+  out = concat(out7, out6, out5, out4, out3, out2, out1, out0)
+
+; 8-bit OR gate
+module or8(a:8, b:8) -> out:8:
+  out0 = or(a[0], b[0])
+  out1 = or(a[1], b[1])
+  out2 = or(a[2], b[2])
+  out3 = or(a[3], b[3])
+  out4 = or(a[4], b[4])
+  out5 = or(a[5], b[5])
+  out6 = or(a[6], b[6])
+  out7 = or(a[7], b[7])
+  out = concat(out7, out6, out5, out4, out3, out2, out1, out0)
+
+; 8-bit XOR gate
+module xor8(a:8, b:8) -> out:8:
+  out0 = xor(a[0], b[0])
+  out1 = xor(a[1], b[1])
+  out2 = xor(a[2], b[2])
+  out3 = xor(a[3], b[3])
+  out4 = xor(a[4], b[4])
+  out5 = xor(a[5], b[5])
+  out6 = xor(a[6], b[6])
+  out7 = xor(a[7], b[7])
+  out = concat(out7, out6, out5, out4, out3, out2, out1, out0)
