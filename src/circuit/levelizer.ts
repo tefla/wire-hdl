@@ -5,7 +5,10 @@ import {
   LevelizedNetlist,
   NandGate,
   SignalId,
+  BehavioralFunction,
 } from '../types/netlist.js';
+import { BehavioralCompiler } from '../compiler/behavioral-compiler.js';
+import type { Program } from '../types/ast.js';
 
 /**
  * Levelize a netlist for efficient simulation.
@@ -15,8 +18,11 @@ import {
  * 2. Build dependency graph (signal -> gates that use it)
  * 3. Topological sort with level assignment
  * 4. Group gates by level
+ *
+ * @param netlist The netlist to levelize
+ * @param program Optional AST program for compiling behavioral functions
  */
-export function levelize(netlist: Netlist): LevelizedNetlist {
+export function levelize(netlist: Netlist, program?: Program): LevelizedNetlist {
   // Track which signals are at level 0 (inputs to combinational logic)
   const level0Signals = new Set<SignalId>();
 
@@ -37,6 +43,35 @@ export function levelize(netlist: Netlist): LevelizedNetlist {
     }
   }
 
+  // Build a map of signals that are driven by behavioral modules
+  // These signals will be assigned levels based on their inputs
+  const behavioralOutputSignals = new Set<SignalId>();
+  const behavioralInputSignals = new Map<SignalId, SignalId[]>(); // output -> inputs that determine its level
+  for (const mod of netlist.behavioralModules) {
+    // Collect all input signals
+    const allInputs: SignalId[] = [];
+    for (const [_, signals] of mod.inputs) {
+      if (Array.isArray(signals)) {
+        allInputs.push(...signals);
+      } else {
+        allInputs.push(signals);
+      }
+    }
+
+    // Mark all outputs and associate them with inputs
+    for (const [_, signals] of mod.outputs) {
+      if (Array.isArray(signals)) {
+        for (const sig of signals) {
+          behavioralOutputSignals.add(sig);
+          behavioralInputSignals.set(sig, allInputs);
+        }
+      } else {
+        behavioralOutputSignals.add(signals);
+        behavioralInputSignals.set(signals, allInputs);
+      }
+    }
+  }
+
   // Build signal level map
   const signalLevel = new Map<SignalId, number>();
 
@@ -45,11 +80,12 @@ export function levelize(netlist: Netlist): LevelizedNetlist {
     signalLevel.set(sig, 0);
   }
 
-  // Compute levels for all NAND gates using iterative approach
+  // Compute levels for all NAND gates and behavioral outputs using iterative approach
   // A gate's output level = max(input levels) + 1
+  // A behavioral output level = max(behavioral input levels) + 1
   let changed = true;
   let iterations = 0;
-  const maxIterations = netlist.nandGates.length + 10; // Safety margin
+  const maxIterations = netlist.nandGates.length + behavioralOutputSignals.size + 10; // Safety margin
 
   while (changed) {
     changed = false;
@@ -61,6 +97,7 @@ export function levelize(netlist: Netlist): LevelizedNetlist {
       );
     }
 
+    // Process NAND gates
     for (const gate of netlist.nandGates) {
       const level1 = signalLevel.get(gate.in1);
       const level2 = signalLevel.get(gate.in2);
@@ -74,6 +111,32 @@ export function levelize(netlist: Netlist): LevelizedNetlist {
           gate.level = newLevel;
           changed = true;
         }
+      }
+    }
+
+    // Process behavioral module output signals
+    // Their level is max(input signal levels) + 1
+    for (const outSig of behavioralOutputSignals) {
+      if (signalLevel.has(outSig)) continue; // Already assigned
+
+      const inputSignals = behavioralInputSignals.get(outSig);
+      if (!inputSignals) continue;
+
+      // Check if all inputs have levels
+      let maxInputLevel = -1;
+      let allInputsHaveLevels = true;
+      for (const inSig of inputSignals) {
+        const level = signalLevel.get(inSig);
+        if (level === undefined) {
+          allInputsHaveLevels = false;
+          break;
+        }
+        if (level > maxInputLevel) maxInputLevel = level;
+      }
+
+      if (allInputsHaveLevels) {
+        signalLevel.set(outSig, maxInputLevel + 1);
+        changed = true;
       }
     }
   }
@@ -102,11 +165,33 @@ export function levelize(netlist: Netlist): LevelizedNetlist {
   const totalSignals = netlist.signals.length;
   const signalBufferSize = Math.ceil(totalSignals / 32);
 
+  // Compile behavioral functions if program is provided
+  // Use compileAll() to support composable behaviors (modules calling each other)
+  let compiledBehaviors: Map<string, BehavioralFunction> | undefined;
+  let behavioralModuleDefs: Map<string, import('../types/ast.js').ModuleDecl> | undefined;
+
+  if (program && netlist.behavioralModules.length > 0) {
+    behavioralModuleDefs = new Map();
+    const compiler = new BehavioralCompiler();
+
+    // Compile ALL behavioral modules so they can call each other
+    compiledBehaviors = compiler.compileAll(program);
+
+    // Store module definitions for WASM compilation
+    for (const mod of program.modules) {
+      if (mod.behavior) {
+        behavioralModuleDefs.set(mod.name, mod);
+      }
+    }
+  }
+
   return {
     ...netlist,
     levels,
     maxLevel,
     signalBufferSize,
+    compiledBehaviors,
+    behavioralModuleDefs,
   };
 }
 

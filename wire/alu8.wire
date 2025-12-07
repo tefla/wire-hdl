@@ -15,6 +15,58 @@
 ;   vout     - Overflow flag (signed overflow for ADD/SUB)
 
 module alu8(a:8, b:8, op:3, cin) -> (result:8, z, n, cout, vout):
+  // Behavioral implementation for fast simulation (MHz speed)
+  @behavior {
+    let temp:9 = 0
+
+    if op == 0 {
+      // ADD: a + b + cin
+      temp = a + b + cin
+      result = temp[7:0]
+      cout = temp[8]
+    } else if op == 1 {
+      // SUB: a - b - !cin
+      temp = a + ~b + cin
+      result = temp[7:0]
+      cout = temp[8]
+    } else if op == 2 {
+      // AND
+      result = a & b
+      cout = 0
+    } else if op == 3 {
+      // OR
+      result = a | b
+      cout = 0
+    } else {
+      // XOR (op == 4 or anything else)
+      result = a ^ b
+      cout = 0
+    }
+
+    // Zero flag: result == 0
+    z = result == 0
+
+    // Negative flag: sign bit
+    n = result[7]
+
+    // Overflow flag: signed overflow for ADD/SUB
+    // V = 1 when two operands of same sign produce result of different sign
+    if op == 0 {
+      // ADD overflow: (a[7] == b[7]) && (a[7] != result[7])
+      let same_sign:1 = !(a[7] ^ b[7])
+      let diff_result:1 = a[7] ^ result[7]
+      vout = same_sign & diff_result
+    } else if op == 1 {
+      // SUB overflow: (a[7] != b[7]) && (a[7] != result[7])
+      let diff_sign:1 = a[7] ^ b[7]
+      let diff_result:1 = a[7] ^ result[7]
+      vout = diff_sign & diff_result
+    } else {
+      vout = 0
+    }
+  }
+
+  // Structural implementation for educational mode (gate-level)
   ; ========================================
   ; Compute all operations in parallel
   ; ========================================

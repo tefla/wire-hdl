@@ -1,6 +1,5 @@
 // Main simulator controller
 
-import { Program } from '../types/ast.js';
 import { LevelizedNetlist, SignalId } from '../types/netlist.js';
 import { parse } from '../parser/index.js';
 import { elaborate } from '../elaborator/index.js';
@@ -44,7 +43,8 @@ export class Simulator {
   ): Simulator {
     const program = parse(source);
     const netlist = elaborate(program, topModule);
-    const levelized = levelize(netlist);
+    // Pass program to levelize so it can compile behavioral functions
+    const levelized = levelize(netlist, program);
     return new Simulator(levelized, options);
   }
 

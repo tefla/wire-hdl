@@ -35,6 +35,30 @@ export interface Dff {
 // Intrinsic module types
 export type IntrinsicType = 'ram' | 'rom' | 'input' | 'output';
 
+// Registry of compiled behavioral modules for inter-module calls
+export type BehavioralModules = Map<string, BehavioralFunction>;
+
+// Compiled behavioral function signature
+// Now takes a third argument: modules registry for calling other behaviors
+export type BehavioralFunction = (
+  inputs: Record<string, number>,
+  state?: Record<string, number>,
+  modules?: BehavioralModules
+) => Record<string, number>;
+
+// Behavioral module - uses compiled TypeScript function instead of NAND gates
+export interface BehavioralModule {
+  id: number;
+  name: string;           // Instance name (e.g., "alu_0")
+  moduleName: string;     // Module definition name (e.g., "alu8")
+  // Signal mappings: parameter/output name -> SignalId(s)
+  inputs: Map<string, SignalId | SignalId[]>;   // Single bit or multi-bit input
+  outputs: Map<string, SignalId | SignalId[]>;  // Single bit or multi-bit output
+  // Width information for packing/unpacking
+  inputWidths: Map<string, number>;
+  outputWidths: Map<string, number>;
+}
+
 export interface Intrinsic {
   id: GateId;
   type: IntrinsicType;
@@ -92,6 +116,7 @@ export interface Netlist {
   nandGates: NandGate[];
   dffs: Dff[];
   intrinsics: Intrinsic[];
+  behavioralModules: BehavioralModule[];
 
   // Statistics
   totalSignals: number;
@@ -107,6 +132,14 @@ export interface LevelizedNetlist extends Netlist {
 
   // Signal allocation for SharedArrayBuffer
   signalBufferSize: number;  // In uint32 words
+
+  // Compiled behavioral functions for fast JS simulation
+  // Maps module name -> compiled function
+  compiledBehaviors?: Map<string, BehavioralFunction>;
+
+  // Module definitions for behavioral modules (needed for WASM compilation)
+  // Maps module name -> module declaration AST
+  behavioralModuleDefs?: Map<string, import('./ast.js').ModuleDecl>;
 }
 
 // Helper to create an empty netlist
@@ -121,6 +154,7 @@ export function createNetlist(name: string): Netlist {
     nandGates: [],
     dffs: [],
     intrinsics: [],
+    behavioralModules: [],
     totalSignals: 0,
     totalNands: 0,
     totalDffs: 0,

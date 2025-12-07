@@ -1,7 +1,7 @@
 // JavaScript evaluation kernel for NAND/DFF simulation
 // This is the fallback when WASM is not available
 
-import { LevelizedNetlist, NandGate, Dff } from '../types/netlist.js';
+import { LevelizedNetlist, NandGate, Dff, BehavioralModule, SignalId } from '../types/netlist.js';
 import { SignalStore } from './signal-store.js';
 
 export class JSKernel {
@@ -14,12 +14,68 @@ export class JSKernel {
   }
 
   /**
-   * Evaluate all combinational logic (all NAND gates in level order)
+   * Evaluate all combinational logic (NAND gates + behavioral modules)
    */
   evaluateCombinational(): void {
+    // First evaluate NAND gates in level order
     for (const level of this.netlist.levels) {
       for (const gate of level) {
         this.evaluateNand(gate);
+      }
+    }
+
+    // Then evaluate behavioral modules
+    if (this.netlist.behavioralModules.length > 0 && this.netlist.compiledBehaviors) {
+      for (const mod of this.netlist.behavioralModules) {
+        this.evaluateBehavioralModule(mod);
+      }
+    }
+  }
+
+  /**
+   * Evaluate a behavioral module by running its compiled function
+   */
+  private evaluateBehavioralModule(mod: BehavioralModule): void {
+    const func = this.netlist.compiledBehaviors?.get(mod.moduleName);
+    if (!func) {
+      return; // No compiled function available
+    }
+
+    // Pack input signals into a record
+    const inputs: Record<string, number> = {};
+    for (const [name, signalIds] of mod.inputs) {
+      const width = mod.inputWidths.get(name) || 1;
+      if (width === 1) {
+        // Single-bit input
+        inputs[name] = this.store.read(signalIds as SignalId);
+      } else {
+        // Multi-bit input: pack bits into a number
+        const bits = signalIds as SignalId[];
+        let value = 0;
+        for (let i = 0; i < bits.length; i++) {
+          value |= this.store.read(bits[i]) << i;
+        }
+        inputs[name] = value;
+      }
+    }
+
+    // Run the behavioral function (pass modules registry for composable behaviors)
+    const outputs = func(inputs, undefined, this.netlist.compiledBehaviors);
+
+    // Unpack output values to signals
+    for (const [name, signalIds] of mod.outputs) {
+      const value = outputs[name] || 0;
+      const width = mod.outputWidths.get(name) || 1;
+
+      if (width === 1) {
+        // Single-bit output
+        this.store.write(signalIds as SignalId, value & 1);
+      } else {
+        // Multi-bit output: unpack bits
+        const bits = signalIds as SignalId[];
+        for (let i = 0; i < bits.length; i++) {
+          this.store.write(bits[i], (value >> i) & 1);
+        }
       }
     }
   }

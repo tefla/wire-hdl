@@ -81,6 +81,52 @@
 ;   is_implied - Instruction has no operand (1 byte total)
 
 module decoder(opcode:8) -> (is_lda, is_lda_abs, is_ldx, is_ldx_abs, is_ldy, is_ldy_abs, is_adc, is_sbc, is_cmp, is_and, is_ora, is_eor, is_sta, is_stx, is_sty, is_jmp, is_jsr, is_rts, is_beq, is_bne, is_inx, is_dex, is_iny, is_dey, is_tax, is_tay, is_txa, is_tya, is_pha, is_pla, is_txs, is_clc, is_sec, is_hlt, needs_imm, needs_addr, needs_rel, needs_load_addr, is_implied):
+  ; Behavioral implementation for fast simulation
+  @behavior {
+    ; Decode individual instruction opcodes
+    is_lda = opcode == 0xA9 ? 1 : 0
+    is_lda_abs = opcode == 0xAD ? 1 : 0
+    is_ldx = opcode == 0xA2 ? 1 : 0
+    is_ldx_abs = opcode == 0xAE ? 1 : 0
+    is_ldy = opcode == 0xA0 ? 1 : 0
+    is_ldy_abs = opcode == 0xAC ? 1 : 0
+    is_adc = opcode == 0x69 ? 1 : 0
+    is_sbc = opcode == 0xE9 ? 1 : 0
+    is_cmp = opcode == 0xC9 ? 1 : 0
+    is_and = opcode == 0x29 ? 1 : 0
+    is_ora = opcode == 0x09 ? 1 : 0
+    is_eor = opcode == 0x49 ? 1 : 0
+    is_sta = opcode == 0x8D ? 1 : 0
+    is_stx = opcode == 0x8E ? 1 : 0
+    is_sty = opcode == 0x8C ? 1 : 0
+    is_jmp = opcode == 0x4C ? 1 : 0
+    is_jsr = opcode == 0x20 ? 1 : 0
+    is_rts = opcode == 0x60 ? 1 : 0
+    is_beq = opcode == 0xF0 ? 1 : 0
+    is_bne = opcode == 0xD0 ? 1 : 0
+    is_inx = opcode == 0xE8 ? 1 : 0
+    is_dex = opcode == 0xCA ? 1 : 0
+    is_iny = opcode == 0xC8 ? 1 : 0
+    is_dey = opcode == 0x88 ? 1 : 0
+    is_tax = opcode == 0xAA ? 1 : 0
+    is_tay = opcode == 0xA8 ? 1 : 0
+    is_txa = opcode == 0x8A ? 1 : 0
+    is_tya = opcode == 0x98 ? 1 : 0
+    is_pha = opcode == 0x48 ? 1 : 0
+    is_pla = opcode == 0x68 ? 1 : 0
+    is_txs = opcode == 0x9A ? 1 : 0
+    is_clc = opcode == 0x18 ? 1 : 0
+    is_sec = opcode == 0x38 ? 1 : 0
+    is_hlt = opcode == 0x02 ? 1 : 0
+
+    ; Compute derived signals
+    needs_imm = is_lda | is_ldx | is_ldy | is_adc | is_sbc | is_cmp | is_and | is_ora | is_eor
+    needs_addr = is_sta | is_stx | is_sty | is_jmp | is_jsr
+    needs_rel = is_beq | is_bne
+    needs_load_addr = is_lda_abs | is_ldx_abs | is_ldy_abs
+    is_implied = is_hlt | is_inx | is_dex | is_iny | is_dey | is_tax | is_tay | is_txa | is_tya | is_pha | is_pla | is_rts | is_txs | is_clc | is_sec
+  }
+
   ; We need to compare opcode with specific values
   ; XOR with target: if match, all bits will be 0
   ; Then NOR-reduce to check if all bits are 0

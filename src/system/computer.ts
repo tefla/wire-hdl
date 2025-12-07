@@ -91,7 +91,8 @@ export class Computer {
 
     const allSource = sources.join('\n');
     const program = parse(allSource);
-    const netlist = elaborate(program, 'cpu_minimal');
+    // Enable behavioral mode for modules with @behavior blocks (e.g., ALU8)
+    const netlist = elaborate(program, 'cpu_minimal', { useBehavioral: true });
 
     // Optimize by default (can disable with optimize: false)
     let finalNetlist = netlist;
@@ -104,7 +105,8 @@ export class Computer {
       finalNetlist = result.netlist;
     }
 
-    this.netlist = levelize(finalNetlist);
+    // Pass program to levelize so behavioral functions can be compiled
+    this.netlist = levelize(finalNetlist, program);
     this.circuit = compileToWasmOptimized(this.netlist);
 
     // Initialize memory with I/O handlers
@@ -260,8 +262,27 @@ export class Computer {
       this.writeBits(this.dataInIds, dataIn);
     }
 
-    // Execute one clock cycle
-    this.circuit.evaluate();
+    // Execute one clock cycle with proper behavioral interleaving
+    if (this.circuit.hasBehavioral && this.circuit.evaluateComb && this.circuit.evaluateDff) {
+      // Hybrid simulation: interleave behavioral and NAND evaluation
+      // Phase 1: Evaluate combinational logic with current inputs
+      this.circuit.evaluateComb();
+      // Phase 1b: Evaluate behavioral modules (inputs are now ready)
+      if (this.circuit.evaluateBehavioral) {
+        this.circuit.evaluateBehavioral();
+      }
+      // Phase 2: DFF sample and update (clock edge)
+      this.circuit.evaluateDff();
+      // Phase 3: Re-evaluate combinational logic with new Q values
+      this.circuit.evaluateComb();
+      // Phase 3b: Re-evaluate behavioral with new inputs
+      if (this.circuit.evaluateBehavioral) {
+        this.circuit.evaluateBehavioral();
+      }
+    } else {
+      // Pure structural simulation - no behavioral interleaving needed
+      this.circuit.evaluate();
+    }
     this.cycleCount++;
 
     // Update tick counter

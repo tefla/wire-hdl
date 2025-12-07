@@ -19,11 +19,17 @@ import {
   NandGate,
   Dff,
   SignalId,
+  BehavioralModule,
   createNetlist,
 } from '../types/netlist.js';
 
 // Built-in primitives that don't get flattened
 const PRIMITIVES = new Set(['nand', 'dff']);
+
+export interface ElaborationOptions {
+  // Use behavioral implementations when available (default: true for speed)
+  useBehavioral?: boolean;
+}
 
 interface ElaborationContext {
   // Module registry from parsed program
@@ -43,12 +49,17 @@ interface ElaborationContext {
 
   // Prefix for signal names (for nested modules)
   prefix: string;
+
+  // Use behavioral implementations when available
+  useBehavioral: boolean;
 }
 
 export class Elaborator {
   private ctx: ElaborationContext;
+  private options: ElaborationOptions;
 
-  constructor() {
+  constructor(options: ElaborationOptions = {}) {
+    this.options = options;
     this.ctx = {
       modules: new Map(),
       netlist: createNetlist(''),
@@ -56,6 +67,7 @@ export class Elaborator {
       buses: new Map(),
       instanceCounter: 0,
       prefix: '',
+      useBehavioral: options.useBehavioral ?? true, // Default to using behavioral
     };
   }
 
@@ -462,9 +474,15 @@ export class Elaborator {
         return;
       }
 
-      // User-defined module - inline it
+      // User-defined module - either use behavioral or inline it
       const mod = this.ctx.modules.get(callee);
       if (mod) {
+        // Check if module has @behavior and we're in behavioral mode
+        if (this.ctx.useBehavioral && mod.behavior) {
+          this.createBehavioralModuleInstance(mod, expr.args, targetSig);
+          return;
+        }
+        // Otherwise inline to NAND gates
         this.inlineModuleToTarget(mod, expr.args, targetSig);
         return;
       }
@@ -892,6 +910,179 @@ export class Elaborator {
   }
 
   /**
+   * Create a behavioral module instance instead of inlining to NAND gates.
+   * This allows the simulator to run the behavioral function directly for speed.
+   */
+  private createBehavioralModuleInstance(
+    mod: ModuleDecl,
+    args: Expr[],
+    targetSig: SignalId
+  ): void {
+    const instanceId = this.ctx.instanceCounter++;
+    const oldPrefix = this.ctx.prefix;
+    const savedSignals = new Map(this.ctx.signals);
+    const savedBuses = new Map(this.ctx.buses);
+    const instanceName = `${oldPrefix}${mod.name}_${instanceId}`;
+
+    // Validate argument count
+    if (args.length !== mod.params.length) {
+      throw new Error(
+        `Module ${mod.name} expects ${mod.params.length} arguments, got ${args.length}`
+      );
+    }
+
+    // Create signal mappings for inputs
+    const inputSignals = new Map<string, SignalId | SignalId[]>();
+    const inputWidths = new Map<string, number>();
+
+    for (let i = 0; i < mod.params.length; i++) {
+      const param = mod.params[i];
+      const arg = args[i];
+      inputWidths.set(param.name, param.width);
+
+      if (param.width === 1) {
+        // Single-bit parameter
+        inputSignals.set(param.name, this.evaluateExpr(arg));
+      } else {
+        // Multi-bit parameter: get each bit signal
+        const bits: SignalId[] = [];
+        for (let bit = 0; bit < param.width; bit++) {
+          bits.push(this.evaluateExprBit(arg, bit));
+        }
+        inputSignals.set(param.name, bits);
+      }
+    }
+
+    // Create signal mappings for outputs
+    const outputSignals = new Map<string, SignalId | SignalId[]>();
+    const outputWidths = new Map<string, number>();
+    const targetVarName = this.ctx.netlist.signals[targetSig]?.name;
+
+    // Handle first output - it maps to targetSig
+    const firstOutput = mod.outputs[0];
+    if (firstOutput) {
+      outputWidths.set(firstOutput.name, firstOutput.width);
+
+      if (firstOutput.width === 1) {
+        outputSignals.set(firstOutput.name, targetSig);
+        // Also store for member access
+        if (targetVarName) {
+          savedSignals.set(`${targetVarName}.${firstOutput.name}`, targetSig);
+        }
+      } else {
+        // Multi-bit output - expand targetSig to a bus
+        const bits: SignalId[] = [];
+        if (targetVarName && !targetVarName.includes('[')) {
+          savedBuses.set(targetVarName, firstOutput.width);
+
+          // Check if bit signals were pre-registered (by preRegisterBuses)
+          // If so, use those existing signals instead of creating new ones
+          for (let bit = 0; bit < firstOutput.width; bit++) {
+            const bitName = `${targetVarName}[${bit}]`;
+            const existingSig = this.ctx.signals.get(bitName);
+            if (existingSig !== undefined) {
+              bits.push(existingSig);
+              savedSignals.set(bitName, existingSig);
+            } else if (bit === 0) {
+              // First bit uses targetSig
+              bits.push(targetSig);
+              savedSignals.set(bitName, targetSig);
+            } else {
+              // Create new signal
+              const sig = this.createSignal(bitName, false, false, false);
+              bits.push(sig);
+              savedSignals.set(bitName, sig);
+            }
+          }
+
+          // Also check for member-access form (e.g., alu.result[0]) used by multi-output modules
+          const memberBitName0 = `${targetVarName}.${firstOutput.name}[0]`;
+          const memberSig0 = this.ctx.signals.get(memberBitName0);
+          if (memberSig0 !== undefined) {
+            // Use the member access signals instead
+            for (let bit = 0; bit < firstOutput.width; bit++) {
+              const memberBitName = `${targetVarName}.${firstOutput.name}[${bit}]`;
+              const memberSig = this.ctx.signals.get(memberBitName);
+              if (memberSig !== undefined) {
+                bits[bit] = memberSig;
+                savedSignals.set(memberBitName, memberSig);
+              }
+            }
+          }
+        } else {
+          // Just create the bit signals
+          for (let bit = 0; bit < firstOutput.width; bit++) {
+            const bitName = `${instanceName}_${firstOutput.name}[${bit}]`;
+            const sig = bit === 0 ? targetSig : this.createSignal(bitName, false, false, false);
+            bits.push(sig);
+          }
+        }
+        outputSignals.set(firstOutput.name, bits);
+      }
+    }
+
+    // Handle remaining outputs
+    for (let i = 1; i < mod.outputs.length; i++) {
+      const output = mod.outputs[i];
+      outputWidths.set(output.name, output.width);
+
+      if (output.width === 1) {
+        // Check if the signal was pre-registered (e.g., alu.z)
+        const memberName = targetVarName ? `${targetVarName}.${output.name}` : null;
+        const existingSig = memberName ? this.ctx.signals.get(memberName) : undefined;
+
+        const sig = existingSig !== undefined
+          ? existingSig
+          : this.createSignal(`${instanceName}_${output.name}`, false, false, false);
+        outputSignals.set(output.name, sig);
+        // Store for member access
+        if (targetVarName) {
+          savedSignals.set(`${targetVarName}.${output.name}`, sig);
+        }
+      } else {
+        // Multi-bit output
+        const bits: SignalId[] = [];
+        for (let bit = 0; bit < output.width; bit++) {
+          // Check for existing signal first
+          const memberBitName = targetVarName ? `${targetVarName}.${output.name}[${bit}]` : null;
+          const existingSig = memberBitName ? this.ctx.signals.get(memberBitName) : undefined;
+
+          const sig = existingSig !== undefined
+            ? existingSig
+            : this.createSignal(`${instanceName}_${output.name}[${bit}]`, false, false, false);
+          bits.push(sig);
+          // Store for member access
+          if (targetVarName) {
+            savedSignals.set(`${targetVarName}.${output.name}[${bit}]`, sig);
+          }
+        }
+        outputSignals.set(output.name, bits);
+        // Also track as bus
+        if (targetVarName) {
+          savedBuses.set(`${targetVarName}.${output.name}`, output.width);
+        }
+      }
+    }
+
+    // Create the behavioral module instance
+    const behavioralModule: BehavioralModule = {
+      id: this.ctx.netlist.behavioralModules.length,
+      name: instanceName,
+      moduleName: mod.name,
+      inputs: inputSignals,
+      outputs: outputSignals,
+      inputWidths,
+      outputWidths,
+    };
+
+    this.ctx.netlist.behavioralModules.push(behavioralModule);
+
+    // Update scope for potential subsequent references
+    this.ctx.signals = savedSignals;
+    this.ctx.buses = savedBuses;
+  }
+
+  /**
    * Get the width (in bits) of an expression.
    * Used for proper multi-bit handling in concat and other operations.
    */
@@ -1098,6 +1289,6 @@ export class Elaborator {
   }
 }
 
-export function elaborate(program: Program, topModule: string): Netlist {
-  return new Elaborator().elaborate(program, topModule);
+export function elaborate(program: Program, topModule: string, options?: ElaborationOptions): Netlist {
+  return new Elaborator(options).elaborate(program, topModule);
 }

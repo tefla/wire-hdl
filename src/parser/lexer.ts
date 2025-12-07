@@ -8,13 +8,44 @@ export type TokenType =
   | 'RPAREN'     // )
   | 'LBRACKET'   // [
   | 'RBRACKET'   // ]
+  | 'LBRACE'     // {
+  | 'RBRACE'     // }
   | 'COMMA'      // ,
   | 'DOT'        // .
   | 'EQUALS'     // =
   | 'IDENTIFIER'
   | 'NUMBER'
   | 'NEWLINE'
-  | 'EOF';
+  | 'EOF'
+  // Behavioral tokens
+  | 'AT'         // @
+  | 'BEHAVIOR'   // behavior keyword
+  | 'STRUCTURE'  // structure keyword
+  | 'IF'
+  | 'ELSE'
+  | 'MATCH'
+  | 'LET'
+  | 'ARROW_FAT'  // =>
+  | 'UNDERSCORE' // _ (default case)
+  // Operators
+  | 'PLUS'       // +
+  | 'MINUS'      // -
+  | 'STAR'       // *
+  | 'AMPERSAND'  // &
+  | 'PIPE'       // |
+  | 'CARET'      // ^
+  | 'TILDE'      // ~
+  | 'BANG'       // !
+  | 'LT'         // <
+  | 'GT'         // >
+  | 'LT_LT'      // <<
+  | 'GT_GT'      // >>
+  | 'EQ_EQ'      // ==
+  | 'BANG_EQ'    // !=
+  | 'LT_EQ'      // <=
+  | 'GT_EQ'      // >=
+  | 'QUESTION'   // ?
+  | 'DOTDOT';    // ..
 
 export interface Token {
   type: TokenType;
@@ -23,6 +54,16 @@ export interface Token {
   column: number;
   offset: number;
 }
+
+const KEYWORDS: Record<string, TokenType> = {
+  'module': 'MODULE',
+  'behavior': 'BEHAVIOR',
+  'structure': 'STRUCTURE',
+  'if': 'IF',
+  'else': 'ELSE',
+  'match': 'MATCH',
+  'let': 'LET',
+};
 
 export class Lexer {
   private source: string;
@@ -51,56 +92,89 @@ export class Lexer {
         continue;
       }
 
-      // Arrow ->
+      // Two-character tokens (check these first)
       if (char === '-' && this.peek(1) === '>') {
         this.addToken('ARROW', '->');
         this.advance(2);
         continue;
       }
+      if (char === '=' && this.peek(1) === '>') {
+        this.addToken('ARROW_FAT', '=>');
+        this.advance(2);
+        continue;
+      }
+      if (char === '=' && this.peek(1) === '=') {
+        this.addToken('EQ_EQ', '==');
+        this.advance(2);
+        continue;
+      }
+      if (char === '!' && this.peek(1) === '=') {
+        this.addToken('BANG_EQ', '!=');
+        this.advance(2);
+        continue;
+      }
+      if (char === '<' && this.peek(1) === '<') {
+        this.addToken('LT_LT', '<<');
+        this.advance(2);
+        continue;
+      }
+      if (char === '>' && this.peek(1) === '>') {
+        this.addToken('GT_GT', '>>');
+        this.advance(2);
+        continue;
+      }
+      if (char === '<' && this.peek(1) === '=') {
+        this.addToken('LT_EQ', '<=');
+        this.advance(2);
+        continue;
+      }
+      if (char === '>' && this.peek(1) === '=') {
+        this.addToken('GT_EQ', '>=');
+        this.advance(2);
+        continue;
+      }
+      if (char === '.' && this.peek(1) === '.') {
+        this.addToken('DOTDOT', '..');
+        this.advance(2);
+        continue;
+      }
 
       // Single character tokens
-      if (char === ':') {
-        this.addToken('COLON', ':');
-        this.advance();
-        continue;
-      }
-      if (char === '(') {
-        this.addToken('LPAREN', '(');
-        this.advance();
-        continue;
-      }
-      if (char === ')') {
-        this.addToken('RPAREN', ')');
-        this.advance();
-        continue;
-      }
-      if (char === '[') {
-        this.addToken('LBRACKET', '[');
-        this.advance();
-        continue;
-      }
-      if (char === ']') {
-        this.addToken('RBRACKET', ']');
-        this.advance();
-        continue;
-      }
-      if (char === ',') {
-        this.addToken('COMMA', ',');
-        this.advance();
-        continue;
-      }
-      if (char === '.') {
-        this.addToken('DOT', '.');
-        this.advance();
-        continue;
-      }
-      if (char === '=') {
-        this.addToken('EQUALS', '=');
+      if (char === ':') { this.addToken('COLON', ':'); this.advance(); continue; }
+      if (char === '(') { this.addToken('LPAREN', '('); this.advance(); continue; }
+      if (char === ')') { this.addToken('RPAREN', ')'); this.advance(); continue; }
+      if (char === '[') { this.addToken('LBRACKET', '['); this.advance(); continue; }
+      if (char === ']') { this.addToken('RBRACKET', ']'); this.advance(); continue; }
+      if (char === '{') { this.addToken('LBRACE', '{'); this.advance(); continue; }
+      if (char === '}') { this.addToken('RBRACE', '}'); this.advance(); continue; }
+      if (char === ',') { this.addToken('COMMA', ','); this.advance(); continue; }
+      if (char === '.') { this.addToken('DOT', '.'); this.advance(); continue; }
+      if (char === '=') { this.addToken('EQUALS', '='); this.advance(); continue; }
+      if (char === '@') { this.addToken('AT', '@'); this.advance(); continue; }
+      if (char === '+') { this.addToken('PLUS', '+'); this.advance(); continue; }
+      if (char === '-') { this.addToken('MINUS', '-'); this.advance(); continue; }
+      if (char === '*') { this.addToken('STAR', '*'); this.advance(); continue; }
+      if (char === '&') { this.addToken('AMPERSAND', '&'); this.advance(); continue; }
+      if (char === '|') { this.addToken('PIPE', '|'); this.advance(); continue; }
+      if (char === '^') { this.addToken('CARET', '^'); this.advance(); continue; }
+      if (char === '~') { this.addToken('TILDE', '~'); this.advance(); continue; }
+      if (char === '!') { this.addToken('BANG', '!'); this.advance(); continue; }
+      if (char === '<') { this.addToken('LT', '<'); this.advance(); continue; }
+      if (char === '>') { this.addToken('GT', '>'); this.advance(); continue; }
+      if (char === '?') { this.addToken('QUESTION', '?'); this.advance(); continue; }
+      if (char === '_' && !this.isAlphaNumeric(this.peek(1))) {
+        this.addToken('UNDERSCORE', '_');
         this.advance();
         continue;
       }
 
-      // Numbers
+      // Hex numbers starting with 0x (check before regular numbers)
+      if (char === '0' && (this.peek(1) === 'x' || this.peek(1) === 'X')) {
+        this.readHexNumber();
+        continue;
+      }
+
+      // Numbers (decimal)
       if (this.isDigit(char)) {
         this.readNumber();
         continue;
@@ -131,8 +205,16 @@ export class Lexer {
         continue;
       }
 
-      // Skip comments (;)
+      // Skip single-line comments (;)
       if (char === ';') {
+        while (this.pos < this.source.length && this.source[this.pos] !== '\n') {
+          this.advance();
+        }
+        continue;
+      }
+
+      // Skip // comments too
+      if (char === '/' && this.peek(1) === '/') {
         while (this.pos < this.source.length && this.source[this.pos] !== '\n') {
           this.advance();
         }
@@ -151,6 +233,15 @@ export class Lexer {
     this.addToken('NUMBER', this.source.slice(start, this.pos));
   }
 
+  private readHexNumber(): void {
+    const start = this.pos;
+    this.advance(2); // Skip 0x
+    while (this.pos < this.source.length && this.isHexDigit(this.source[this.pos])) {
+      this.advance();
+    }
+    this.addToken('NUMBER', this.source.slice(start, this.pos));
+  }
+
   private readIdentifier(): void {
     const start = this.pos;
     while (
@@ -162,8 +253,9 @@ export class Lexer {
     const value = this.source.slice(start, this.pos);
 
     // Check for keywords
-    if (value === 'module') {
-      this.addToken('MODULE', value);
+    const keywordType = KEYWORDS[value];
+    if (keywordType) {
+      this.addToken(keywordType, value);
     } else {
       this.addToken('IDENTIFIER', value);
     }
@@ -198,6 +290,12 @@ export class Lexer {
 
   private isDigit(char: string): boolean {
     return char >= '0' && char <= '9';
+  }
+
+  private isHexDigit(char: string): boolean {
+    return this.isDigit(char) ||
+           (char >= 'a' && char <= 'f') ||
+           (char >= 'A' && char <= 'F');
   }
 
   private isAlpha(char: string): boolean {

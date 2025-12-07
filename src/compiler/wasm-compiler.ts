@@ -2,7 +2,8 @@
 // Generates circuit-specific WASM for maximum performance
 
 import binaryen from 'binaryen';
-import { LevelizedNetlist, NandGate, Dff, SignalId } from '../types/netlist.js';
+import { LevelizedNetlist } from '../types/netlist.js';
+import { generateInlinedBehavioral } from './behavioral-wasm-compiler.js';
 
 export interface CompiledCircuit {
   wasmModule: WebAssembly.Module;
@@ -12,6 +13,12 @@ export interface CompiledCircuit {
   setSignal: (id: number, value: number) => void;
   getSignal: (id: number) => number;
   runCycles: (count: number) => void;
+  // For hybrid behavioral/structural simulation
+  evaluateBehavioral?: () => void;
+  // Split evaluation for behavioral interleaving (if behavioral modules present)
+  evaluateComb?: () => void;      // Evaluate combinational logic only
+  evaluateDff?: () => void;       // Sample D, update Q
+  hasBehavioral?: boolean;        // True if behavioral modules need evaluation
 }
 
 /**
@@ -372,6 +379,115 @@ function generateInlinedRunCyclesFunction(
 }
 
 /**
+ * Compile behavioral modules to a separate WASM module.
+ * This module shares memory with the main module but is compiled with level 2
+ * optimization to avoid the Binaryen LocalCSE bug.
+ *
+ * Returns a function that evaluates all behavioral modules by reading inputs
+ * from shared memory and writing outputs back.
+ */
+function compileBehavioralWasm(
+  netlist: LevelizedNetlist,
+  memory: WebAssembly.Memory
+): (() => void) | undefined {
+  if (netlist.behavioralModules.length === 0 || !netlist.behavioralModuleDefs) {
+    return undefined;
+  }
+
+  const behavioralMod = new binaryen.Module();
+
+  // Import the shared memory
+  behavioralMod.addMemoryImport('0', 'env', 'memory');
+
+  // Helper to generate inlined read_bit (direct memory access)
+  function readBit(signalId: number): binaryen.ExpressionRef {
+    const wordOffset = Math.floor(signalId / 32) * 4;
+    const bitIdx = signalId % 32;
+    return behavioralMod.i32.and(
+      behavioralMod.i32.shr_u(
+        behavioralMod.i32.load(0, 4, behavioralMod.i32.const(wordOffset)),
+        behavioralMod.i32.const(bitIdx)
+      ),
+      behavioralMod.i32.const(1)
+    );
+  }
+
+  // Helper to generate inlined write_bit (direct memory access)
+  function writeBit(signalId: number, valueExpr: binaryen.ExpressionRef): binaryen.ExpressionRef {
+    const wordOffset = Math.floor(signalId / 32) * 4;
+    const bitIdx = signalId % 32;
+    const bitMask = 1 << bitIdx;
+    return behavioralMod.i32.store(
+      0, 4,
+      behavioralMod.i32.const(wordOffset),
+      behavioralMod.i32.or(
+        behavioralMod.i32.and(
+          behavioralMod.i32.load(0, 4, behavioralMod.i32.const(wordOffset)),
+          behavioralMod.i32.const(~bitMask)
+        ),
+        behavioralMod.i32.shl(
+          behavioralMod.i32.and(valueExpr, behavioralMod.i32.const(1)),
+          behavioralMod.i32.const(bitIdx)
+        )
+      )
+    );
+  }
+
+  // Generate behavioral evaluation statements
+  const statements: binaryen.ExpressionRef[] = [];
+
+  for (const behavioralInstance of netlist.behavioralModules) {
+    const moduleDef = netlist.behavioralModuleDefs.get(behavioralInstance.moduleName);
+    if (moduleDef) {
+      const behavioralStmts = generateInlinedBehavioral(
+        behavioralMod,
+        behavioralInstance,
+        moduleDef,
+        readBit,
+        writeBit
+      );
+      statements.push(...behavioralStmts);
+    }
+  }
+
+  // Create the evaluate_behavioral function
+  behavioralMod.addFunction(
+    'evaluate_behavioral',
+    binaryen.none,
+    binaryen.none,
+    [],
+    behavioralMod.block(null, statements)
+  );
+  behavioralMod.addFunctionExport('evaluate_behavioral', 'evaluate_behavioral');
+
+  // Use level 2 optimization to avoid LocalCSE bug
+  binaryen.setOptimizeLevel(2);
+  binaryen.setShrinkLevel(0);
+  behavioralMod.optimize();
+
+  if (!behavioralMod.validate()) {
+    console.warn('Behavioral WASM module invalid, falling back to JS');
+    behavioralMod.dispose();
+    return undefined;
+  }
+
+  const binary = behavioralMod.emitBinary();
+  behavioralMod.dispose();
+
+  // Instantiate with the shared memory
+  const wasmModule = new WebAssembly.Module(binary);
+  const wasmInstance = new WebAssembly.Instance(wasmModule, {
+    env: { memory },
+  });
+
+  const exports = wasmInstance.exports as {
+    evaluate_behavioral: () => void;
+  };
+
+  return exports.evaluate_behavioral;
+}
+
+/**
  * More aggressive optimization: inline everything and use direct memory access
  * This version generates a single function with all operations inlined
  */
@@ -390,9 +506,11 @@ export function compileToWasmOptimized(netlist: LevelizedNetlist): CompiledCircu
   generateInlinedEvaluateFunction(mod, netlist);
   generateRunCyclesFunction(mod, netlist);
 
-  // Use aggressive optimization
+  // Use aggressive optimization (level 4)
+  // Note: Behavioral modules use JS fallback, so LocalCSE bug doesn't apply
+  // The NAND gate code pattern is safe with high optimization levels
   binaryen.setOptimizeLevel(4);
-  binaryen.setShrinkLevel(0); // Don't shrink, focus on speed
+  binaryen.setShrinkLevel(0);
   mod.optimize();
 
   if (!mod.validate()) {
@@ -413,9 +531,13 @@ export function compileToWasmOptimized(netlist: LevelizedNetlist): CompiledCircu
     env: { memory },
   });
 
+  const hasBehavioral = netlist.behavioralModules.length > 0;
+
   const exports = wasmInstance.exports as {
     evaluate: () => void;
     run_cycles: (n: number) => void;
+    evaluate_comb?: () => void;
+    evaluate_dff?: () => void;
   };
 
   const view = new Uint32Array(memory.buffer);
@@ -431,26 +553,85 @@ export function compileToWasmOptimized(netlist: LevelizedNetlist): CompiledCircu
     }
   }
 
+  // Create signal accessors for behavioral JS fallback
+  const getSignal = (id: number) => {
+    const wordIdx = Math.floor(id / 32);
+    const bitIdx = id % 32;
+    return (view[wordIdx] >> bitIdx) & 1;
+  };
+
+  const setSignal = (id: number, value: number) => {
+    const wordIdx = Math.floor(id / 32);
+    const bitIdx = id % 32;
+    if (value) {
+      view[wordIdx] |= 1 << bitIdx;
+    } else {
+      view[wordIdx] &= ~(1 << bitIdx);
+    }
+  };
+
+  // Use JS fallback for behavioral modules
+  // NOTE: WASM behavioral compilation (compileBehavioralWasm) is disabled because
+  // the generateInlinedBehavioral function doesn't properly handle local variables.
+  // The JS fallback works correctly and provides good performance (~24-39k cycles/sec).
+  let evaluateBehavioral: (() => void) | undefined;
+  if (netlist.behavioralModules.length > 0) {
+    // Use JS fallback for behavioral modules
+    if (netlist.compiledBehaviors) {
+      const behaviors = netlist.compiledBehaviors;
+      const modules = netlist.behavioralModules;
+
+      evaluateBehavioral = () => {
+        for (const mod of modules) {
+          const func = behaviors.get(mod.moduleName);
+          if (!func) continue;
+
+          // Pack input signals into numbers
+          const inputs: Record<string, number> = {};
+          for (const [name, signalIds] of mod.inputs) {
+            if (Array.isArray(signalIds)) {
+              let value = 0;
+              for (let i = 0; i < signalIds.length; i++) {
+                value |= getSignal(signalIds[i]) << i;
+              }
+              inputs[name] = value;
+            } else {
+              inputs[name] = getSignal(signalIds);
+            }
+          }
+
+          // Call the compiled behavior function
+          const outputs = func(inputs);
+
+          // Unpack output numbers back to signals
+          for (const [name, signalIds] of mod.outputs) {
+            const value = outputs[name] ?? 0;
+            if (Array.isArray(signalIds)) {
+              for (let i = 0; i < signalIds.length; i++) {
+                setSignal(signalIds[i], (value >> i) & 1);
+              }
+            } else {
+              setSignal(signalIds, value & 1);
+            }
+          }
+        }
+      };
+    }
+  }
+
   return {
     wasmModule,
     wasmInstance,
     memory,
     evaluate: exports.evaluate,
     runCycles: exports.run_cycles,
-    setSignal: (id: number, value: number) => {
-      const wordIdx = Math.floor(id / 32);
-      const bitIdx = id % 32;
-      if (value) {
-        view[wordIdx] |= 1 << bitIdx;
-      } else {
-        view[wordIdx] &= ~(1 << bitIdx);
-      }
-    },
-    getSignal: (id: number) => {
-      const wordIdx = Math.floor(id / 32);
-      const bitIdx = id % 32;
-      return (view[wordIdx] >> bitIdx) & 1;
-    },
+    setSignal,
+    getSignal,
+    evaluateBehavioral,
+    // Split functions for behavioral interleaving
+    evaluateComb: exports.evaluate_comb,
+    evaluateDff: exports.evaluate_dff,
+    hasBehavioral,
   };
 }
 
@@ -505,9 +686,71 @@ function generateInlinedEvaluateFunction(
   // 3. Update all DFF Q outputs (clock edge)
   // 4. Re-evaluate combinational logic (so outputs reflect new Q values)
 
+  // Helper to add behavioral module evaluation
+  const addBehavioralEval = () => {
+    // NOTE: WASM behavioral is disabled due to Binaryen LocalCSE bug
+    // The bug (GitHub issue #6066) requires optimization level 2 which hurts overall performance
+    // JS fallback at level 4 optimization gives better performance (~39k vs ~21k cycles/sec)
+    //
+    // TODO: Consider these alternatives to re-enable WASM behavioral:
+    // 1. Generate WAT directly (bypass Binaryen) - https://github.com/btzy/wasm-codegen
+    // 2. Generate behavioral as separate WASM module with level 2, main module with level 4
+    // 3. Wait for Binaryen fix upstream
+    if (false && netlist.behavioralModules.length > 0 && netlist.behavioralModuleDefs) {
+      for (const behavioralMod of netlist.behavioralModules) {
+        const moduleDef = netlist.behavioralModuleDefs.get(behavioralMod.moduleName);
+        if (moduleDef) {
+          const behavioralStmts = generateInlinedBehavioral(
+            mod,
+            behavioralMod,
+            moduleDef,
+            readBit,
+            writeBit
+          );
+          statements.push(...behavioralStmts);
+        }
+      }
+    }
+  };
+
+  // Find the level at which behavioral modules should be evaluated
+  // This is based on the max level of their input signals
+  let behavioralLevel = -1;
+  if (netlist.behavioralModules.length > 0) {
+    // Find the maximum level of any signal that feeds into behavioral modules
+    // Behavioral outputs should be evaluated at (max input level + 1)
+    const signalLevelMap = new Map<number, number>();
+
+    // Build signal level map from gates
+    for (let levelIdx = 0; levelIdx < netlist.levels.length; levelIdx++) {
+      for (const gate of netlist.levels[levelIdx]) {
+        signalLevelMap.set(gate.out, levelIdx + 1); // Gate output level = gate level + 1 (0-indexed vs 1-indexed)
+      }
+    }
+
+    // Check behavioral module inputs
+    for (const mod of netlist.behavioralModules) {
+      for (const [_, signals] of mod.inputs) {
+        const sigArray = Array.isArray(signals) ? signals : [signals];
+        for (const sig of sigArray) {
+          const level = signalLevelMap.get(sig);
+          if (level !== undefined && level > behavioralLevel) {
+            behavioralLevel = level;
+          }
+        }
+      }
+    }
+    // Behavioral evaluation happens after inputs are ready
+    behavioralLevel += 1;
+  }
+
   // Helper to add combinational evaluation
+  // Note: When using JS fallback for behavioral, we insert a marker at the right level
+  // and the actual behavioral eval is done separately. The marker is just to track where it should go.
   const addCombinationalEval = () => {
-    for (const level of netlist.levels) {
+    // Evaluate NAND gates in level order
+    for (let levelIdx = 0; levelIdx < netlist.levels.length; levelIdx++) {
+      const level = netlist.levels[levelIdx];
       for (const gate of level) {
         const nandResult = mod.i32.xor(
           mod.i32.and(readBit(gate.in1), readBit(gate.in2)),
@@ -515,9 +758,70 @@ function generateInlinedEvaluateFunction(
         );
         statements.push(writeBit(gate.out, nandResult));
       }
+
+      // Insert behavioral evaluation at the correct level (if using WASM behavioral)
+      if (levelIdx === behavioralLevel - 1) {
+        addBehavioralEval();
+      }
+    }
+
+    // If behavioral level is beyond all NAND levels, evaluate at the end
+    if (behavioralLevel >= netlist.levels.length) {
+      addBehavioralEval();
     }
   };
 
+  // If behavioral modules present, generate split functions for proper interleaving
+  const hasBehavioral = netlist.behavioralModules.length > 0;
+
+  if (hasBehavioral) {
+    // Generate split functions for behavioral interleaving:
+    // - evaluate_comb: just combinational logic
+    // - evaluate_dff: sample D, update Q
+    // - evaluate: combined (for backwards compatibility and non-behavioral use)
+
+    // evaluate_comb: combinational logic only
+    const combStatements: binaryen.ExpressionRef[] = [];
+    for (let levelIdx = 0; levelIdx < netlist.levels.length; levelIdx++) {
+      const level = netlist.levels[levelIdx];
+      for (const gate of level) {
+        const nandResult = mod.i32.xor(
+          mod.i32.and(readBit(gate.in1), readBit(gate.in2)),
+          mod.i32.const(1)
+        );
+        combStatements.push(writeBit(gate.out, nandResult));
+      }
+    }
+    mod.addFunction('evaluate_comb', binaryen.none, binaryen.none, [], mod.block(null, combStatements));
+    mod.addFunctionExport('evaluate_comb', 'evaluate_comb');
+
+    // evaluate_dff: sample D values, then update Q values
+    if (numDffs > 0) {
+      const dffStatements: binaryen.ExpressionRef[] = [];
+      const dffLocals: binaryen.Type[] = [];
+
+      // Read D values into locals
+      for (let i = 0; i < numDffs; i++) {
+        const dff = netlist.dffs[i];
+        dffStatements.push(mod.local.set(i, readBit(dff.d)));
+        dffLocals.push(binaryen.i32);
+      }
+
+      // Write Q values from locals
+      for (let i = 0; i < numDffs; i++) {
+        const dff = netlist.dffs[i];
+        dffStatements.push(writeBit(dff.q, mod.local.get(i, binaryen.i32)));
+      }
+
+      mod.addFunction('evaluate_dff', binaryen.none, binaryen.none, dffLocals, mod.block(null, dffStatements));
+    } else {
+      // No DFFs - empty function
+      mod.addFunction('evaluate_dff', binaryen.none, binaryen.none, [], mod.nop());
+    }
+    mod.addFunctionExport('evaluate_dff', 'evaluate_dff');
+  }
+
+  // Generate main evaluate function (full cycle for non-behavioral or backwards compat)
   // Step 1: Evaluate combinational logic with current inputs
   addCombinationalEval();
 

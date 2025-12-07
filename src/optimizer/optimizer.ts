@@ -213,6 +213,8 @@ export function optimize(
     totalNands: allGates.length,
     totalDffs: netlist.dffs.length,
     signalMap: new Map(),
+    intrinsics: netlist.intrinsics || [],
+    behavioralModules: netlist.behavioralModules || [],
   };
 
   // Rebuild signal map
