@@ -17,8 +17,8 @@ import { assemble } from '../assembler/stage0.js';
 export const HEX_LOADER_ZP = {
   LOAD_LO: 0xf0,      // Load address low byte
   LOAD_HI: 0xf1,      // Load address high byte
-  INPUT_BUF: 0xf2,    // Input buffer (16 bytes: $F2-$01)
-  INPUT_LEN: 0x02,    // Input length (at $02, after buffer wraps)
+  INPUT_BUF: 0x80,    // Input buffer (64 bytes: $80-$BF)
+  INPUT_LEN: 0x02,    // Input length (at $02)
   TEMP: 0x03,         // Temp storage
   TEMP2: 0x04,        // Temp storage 2
 };
@@ -36,7 +36,7 @@ export const HEX_LOADER_SOURCE = `
 ;
 ; Zero Page Usage:
 ;   $F0-$F1   Load address (little-endian)
-;   $F2-$01   Input buffer (16 bytes, wraps into page zero)
+;   $80-$BF   Input buffer (64 bytes)
 ;   $02       Input length
 ;   $03-$04   Temp storage
 ;
@@ -102,7 +102,7 @@ PRINT_PROMPT:
     RTS
 
 ; ============================================================
-; READ_LINE - Read a line of input into buffer at $F2
+; READ_LINE - Read a line of input into buffer at $80
 ; Returns length in $02
 ; ============================================================
 READ_LINE:
@@ -115,9 +115,9 @@ READ_LOOP:
     BEQ READ_BS
     CMP #$7F            ; Delete?
     BEQ READ_BS
-    CPX #$0F            ; Buffer full?
+    CPX #$3F            ; Buffer full? (63 chars max)
     BEQ READ_LOOP       ; Ignore if full
-    STA $F2,X           ; Store char
+    STA $80,X           ; Store char
     INX
     JSR $F000           ; Echo char
     JMP READ_LOOP
@@ -135,7 +135,7 @@ READ_BS:
 READ_DONE:
     STX $02             ; Store length
     LDA #$00
-    STA $F2,X           ; Null terminate
+    STA $80,X           ; Null terminate
     JSR $F080           ; NEWLINE
     RTS
 
@@ -146,7 +146,20 @@ PARSE_LINE:
     LDA $02             ; Get length
     BEQ PARSE_DONE      ; Empty line
 
-    LDA $F2             ; Get first char
+    LDA $80             ; Get first char
+    STA $04             ; Save for command checks
+
+    ; If line starts with two hex digits, treat as data instead of command
+    JSR HEX_DIGIT       ; First digit valid?
+    BCS PARSE_CMDS      ; Not hex - treat as command
+    LDX #$01
+    LDA $80,X           ; Second character
+    JSR HEX_DIGIT
+    BCS PARSE_CMDS      ; Second not hex - command path
+    JMP PARSE_HEX_BYTES ; Both hex digits => hex entry
+
+PARSE_CMDS:
+    LDA $04             ; Restore first char for command checks
 
     ; Check for commands (uppercase)
     CMP #$4C            ; 'L' - Load address
@@ -329,7 +342,7 @@ PARSE_HEX_BYTES:
 PHB_LOOP:
     ; Skip spaces
     LDX $03
-    LDA $F2,X
+    LDA $80,X
     BEQ PHB_DONE        ; End of input
     CMP #$20            ; Space?
     BNE PHB_PARSE
@@ -379,7 +392,7 @@ PARSE_ADDR:
     ; Skip leading spaces
 PA_SKIP:
     LDX $03
-    LDA $F2,X
+    LDA $80,X
     BEQ PA_DONE         ; End of input
     CMP #$20            ; Space?
     BNE PA_HI
@@ -408,14 +421,14 @@ PA_ERROR:
 
 ; ============================================================
 ; PARSE_BYTE - Parse two hex digits from input
-; Input: $03 = parse index into $F2 buffer
+; Input: $03 = parse index into $80 buffer
 ; Output: A = byte value, C=0 on success, C=1 on error
 ; Side effect: $03 advanced by 2
 ; ============================================================
 PARSE_BYTE:
     ; Get first digit
     LDX $03
-    LDA $F2,X
+    LDA $80,X
     JSR HEX_DIGIT       ; Convert to 0-15
     BCS PB_ERROR
     ASL A               ; Shift to high nibble
@@ -427,7 +440,7 @@ PARSE_BYTE:
     ; Get second digit
     INC $03
     LDX $03
-    LDA $F2,X
+    LDA $80,X
     JSR HEX_DIGIT
     BCS PB_ERROR
     ORA $04             ; Combine with high nibble

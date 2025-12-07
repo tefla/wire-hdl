@@ -547,11 +547,13 @@ class BootstrapComputer {
     }
   }
 
-  runUntilOutput(expected: string, maxInstructions: number = 1000000): boolean {
+  runUntilOutput(expected: string, maxInstructions: number = 1000000, settleInstructions: number = 2000): boolean {
     for (let i = 0; i < maxInstructions; i++) {
       this.cpu.step();
       this.processIO();
       if (this.output.includes(expected)) {
+        // Let any remaining output drain so callers can assert on full responses
+        this.run(settleInstructions);
         return true;
       }
     }
@@ -665,10 +667,7 @@ describe('Shell Direct Load Test', () => {
   });
 });
 
-// TODO: Fix hex loader bootstrap timing/corruption issues
-// The direct load tests prove the shell works correctly
-// The hex loader has issues with properly storing entered bytes
-describe.skip('Shell Bootstrap via Hex Loader', () => {
+describe('Shell Bootstrap via Hex Loader', () => {
   it('should boot to hex loader and show prompt', () => {
     const computer = new BootstrapComputer();
     const found = computer.runUntilOutput('>', 100000);

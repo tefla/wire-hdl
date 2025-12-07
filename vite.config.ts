@@ -6,4 +6,7 @@ export default defineConfig({
   build: {
     outDir: 'dist-web',
   },
+  test: {
+    exclude: ['**/node_modules/**', '**/e2e/**', '**/*.spec.ts'],
+  },
 });
