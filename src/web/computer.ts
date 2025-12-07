@@ -102,12 +102,19 @@ export class Computer {
       this.memory[IO.SERIAL_DATA] = 0; // Clear after output
     }
 
-    // Handle keyboard status
-    this.memory[IO.KBD_STATUS] = this.keyBuffer.length > 0 ? 0x01 : 0x00;
-
-    // Handle keyboard data read
-    if (this.memory[IO.KBD_DATA] === 0xff && this.keyBuffer.length > 0) {
+    // Handle keyboard - deliver one key at a time
+    // When a key is available, put it in KBD_DATA and set status
+    // Clear the key from buffer once delivered (CPU reads it on next instruction)
+    if (this.keyBuffer.length > 0 && this.memory[IO.KBD_DATA] === 0) {
+      // Deliver next key
       this.memory[IO.KBD_DATA] = this.keyBuffer.shift()!;
+      this.memory[IO.KBD_STATUS] = 0x01; // Key available
+    } else if (this.memory[IO.KBD_DATA] !== 0) {
+      // Key is waiting to be read
+      this.memory[IO.KBD_STATUS] = 0x01;
+    } else {
+      // No key available
+      this.memory[IO.KBD_STATUS] = 0x00;
     }
 
     // Handle serial status (always ready)

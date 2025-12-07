@@ -54,12 +54,17 @@ PUTCHAR:
 ; GETCHAR - Wait for keypress and return character
 ; Input:  None
 ; Output: A = character read
+; Clobbers: None (A has result)
 ; ============================================================
 GETCHAR:
   LDA $8010           ; Keyboard status
   AND #$01            ; Key available?
   BEQ GETCHAR         ; No, keep waiting
   LDA $8011           ; Read key data
+  PHA                 ; Save key
+  LDA #$00
+  STA $8011           ; Clear key data (signals we consumed it)
+  PLA                 ; Restore key
   RTS
 
 ; Padding to align NEWLINE at $F080
@@ -148,6 +153,10 @@ export function assembleBios(): Uint8Array {
         AND #$01
         BEQ GETCHAR
         LDA $8011
+        PHA
+        LDA #$00
+        STA $8011
+        PLA
         RTS
     ` },
     // NEWLINE at $F080

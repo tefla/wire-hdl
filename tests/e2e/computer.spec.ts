@@ -73,24 +73,39 @@ test.describe('WireOS Computer', () => {
     }
   });
 
-  test('should handle keyboard input', async ({ page }) => {
+  test('should handle keyboard input and echo typed characters', async ({ page }) => {
     await page.goto('/');
 
     // Start the computer
     await page.getByRole('button', { name: 'Start' }).click();
-    await page.waitForTimeout(500);
 
-    // Focus the terminal and type
+    // Wait for boot
+    await page.waitForTimeout(1000);
+
+    // Focus the terminal
     const terminal = page.locator('[tabindex="0"]').first();
-    await terminal.focus();
-    await page.keyboard.type('L 0200');
+    await terminal.click();
+    await page.waitForTimeout(100);
+
+    // Type a simple command character by character with delays
+    for (const char of 'D 0200') {
+      await page.keyboard.type(char);
+      await page.waitForTimeout(50);
+    }
     await page.keyboard.press('Enter');
 
-    // Wait for processing
-    await page.waitForTimeout(500);
+    // Wait for processing and response
+    await page.waitForTimeout(1000);
 
     // Take screenshot
     await page.screenshot({ path: 'tests/e2e/after-input.png' });
+
+    // Check terminal content contains typed command
+    const terminalText = await page.getByTestId('terminal-screen').textContent();
+    console.log('Terminal after typing:', terminalText?.substring(0, 300));
+
+    // The typed command should appear in the terminal
+    expect(terminalText).toContain('D 0200');
   });
 
   test('debug: check console output during boot', async ({ page }) => {

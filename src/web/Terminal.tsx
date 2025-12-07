@@ -89,6 +89,9 @@ export function Terminal({ onKeyPress, diskActive }: TerminalProps) {
     (e: React.KeyboardEvent) => {
       e.preventDefault();
 
+      // Ignore auto-repeat events
+      if (e.repeat) return;
+
       let key = 0;
 
       if (e.key === 'Enter') {
