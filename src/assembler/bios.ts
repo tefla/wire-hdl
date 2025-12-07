@@ -2,21 +2,7 @@
 // Provides basic I/O routines: PUTCHAR, GETCHAR, screen init
 // Located in ROM at $F000-$FFFF
 
-import { assemble, createRomImage } from './stage0.js';
-
-// Memory map constants (must match memory.ts)
-const MEM = {
-  // Video RAM
-  VIDEO_START: 0x4000,
-  VIDEO_SIZE: 2000, // 80x25
-
-  // I/O Registers
-  CURSOR_X: 0x8001,
-  CURSOR_Y: 0x8002,
-  KBD_STATUS: 0x8010,
-  KBD_DATA: 0x8011,
-  SERIAL_DATA: 0x8031,
-};
+import { assemble } from './stage0.js';
 
 // BIOS entry points (fixed addresses for application use)
 export const BIOS = {
@@ -29,9 +15,6 @@ export const BIOS = {
   ENTRY: 0xFF00,      // Reset entry point
 };
 
-// Screen dimensions
-const SCREEN_WIDTH = 80;
-const SCREEN_HEIGHT = 25;
 
 // BIOS source code in assembly
 // Simplified for the wire-hdl CPU which only has immediate and absolute addressing

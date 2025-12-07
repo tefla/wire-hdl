@@ -3,7 +3,7 @@
 // Located in ROM, uses BIOS routines
 
 import { assemble } from './stage0.js';
-import { assembleBios, BIOS } from './bios.js';
+import { assembleBios } from './bios.js';
 
 // Monitor commands
 export const MONITOR = {
@@ -14,17 +14,6 @@ export const MONITOR = {
   PEEK: 0xE0C0,      // Read memory location
   POKE: 0xE100,      // Write memory location
   RUN: 0xE140,       // Jump to address
-};
-
-// Zero page variables used by monitor
-const ZP = {
-  INPUT_BUF: 0x0080,   // Input buffer (32 bytes) $0080-$009F
-  INPUT_LEN: 0x00A0,   // Current input length
-  PARSE_PTR: 0x00A1,   // Parse pointer into buffer
-  ADDR_LO: 0x00A2,     // Parsed address low byte
-  ADDR_HI: 0x00A3,     // Parsed address high byte
-  VALUE: 0x00A4,       // Parsed value byte
-  TEMP: 0x00A5,        // Temp storage
 };
 
 // Monitor source code
