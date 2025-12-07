@@ -1,16 +1,22 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Terminal } from './Terminal.js';
+import { Display } from './Display.js';
 import { Computer } from './computer.js';
 import { PersistentDisk } from './persistent-disk.js';
+import { createFloppyDisk } from '../bootstrap/disk-image.js';
+import type { GraphicsCard } from './graphics-card.js';
 
 export function App() {
   const [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false);
   const [diskActive, setDiskActive] = useState(false);
+  const [floppyActive, setFloppyActive] = useState(false);
+  const [floppyInserted, setFloppyInserted] = useState(false);
   const [cpuState, setCpuState] = useState({ pc: 0, a: 0, x: 0, y: 0, sp: 0, p: 0 });
+  const [graphics, setGraphics] = useState<GraphicsCard | null>(null);
 
   const computerRef = useRef<Computer | null>(null);
   const diskRef = useRef<PersistentDisk | null>(null);
+  const displayContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Initialize on mount
   useEffect(() => {
@@ -30,9 +36,13 @@ export function App() {
         onDiskActivity: (reading) => {
           setDiskActive(reading);
         },
+        onFloppyActivity: (reading) => {
+          setFloppyActive(reading);
+        },
       });
 
       computerRef.current = computer;
+      setGraphics(computer.getGraphics());
       setReady(true);
     }
 
@@ -56,9 +66,37 @@ export function App() {
     return () => clearInterval(interval);
   }, [running]);
 
-  const handleKeyPress = useCallback((key: number) => {
-    computerRef.current?.sendKey(key);
-  }, []);
+  // Handle keyboard input on the display container
+  useEffect(() => {
+    const container = displayContainerRef.current;
+    if (!container) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      let key = 0;
+
+      if (e.key.length === 1) {
+        key = e.key.charCodeAt(0);
+      } else {
+        switch (e.key) {
+          case 'Enter': key = 13; break;
+          case 'Backspace': key = 8; break;
+          case 'Escape': key = 27; break;
+          case 'ArrowUp': key = 0x91; break;
+          case 'ArrowDown': key = 0x92; break;
+          case 'ArrowLeft': key = 0x93; break;
+          case 'ArrowRight': key = 0x94; break;
+        }
+      }
+
+      if (key !== 0) {
+        computerRef.current?.sendKey(key);
+      }
+    };
+
+    container.addEventListener('keydown', handleKeyDown);
+    return () => container.removeEventListener('keydown', handleKeyDown);
+  }, [ready]);
 
   const handleStart = useCallback(() => {
     if (computerRef.current) {
@@ -113,6 +151,19 @@ export function App() {
     input.click();
   }, []);
 
+  const handleFloppyToggle = useCallback(() => {
+    if (!computerRef.current) return;
+
+    if (floppyInserted) {
+      computerRef.current.ejectFloppy();
+      setFloppyInserted(false);
+    } else {
+      const floppySectors = createFloppyDisk();
+      computerRef.current.insertFloppy(floppySectors);
+      setFloppyInserted(true);
+    }
+  }, [floppyInserted]);
+
   const hex = (n: number, digits = 4) => n.toString(16).toUpperCase().padStart(digits, '0');
 
   if (!ready) {
@@ -137,7 +188,15 @@ export function App() {
         <h1 style={{ color: '#33ff33', fontSize: '24px', fontWeight: 'normal' }}>
           WireOS Computer
         </h1>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <Button onClick={handleFloppyToggle}>
+            {floppyInserted ? 'Eject Floppy' : 'Insert WireOS Disk'}
+          </Button>
+          {floppyInserted && (
+            <span style={{ color: floppyActive ? '#ffff00' : '#33ff33', fontSize: '12px' }}>
+              A:
+            </span>
+          )}
           {!running ? (
             <Button onClick={handleStart}>Start</Button>
           ) : (
@@ -147,8 +206,33 @@ export function App() {
         </div>
       </div>
 
-      {/* Terminal */}
-      <Terminal onKeyPress={handleKeyPress} diskActive={diskActive} />
+      {/* Display */}
+      <div
+        ref={displayContainerRef}
+        tabIndex={0}
+        style={{
+          outline: 'none',
+          display: 'flex',
+          justifyContent: 'center',
+          position: 'relative',
+        }}
+        onClick={(e) => e.currentTarget.focus()}
+      >
+        {graphics && <Display graphics={graphics} scale={2} />}
+        {diskActive && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              color: '#ff0',
+              fontSize: '12px',
+            }}
+          >
+            HDD
+          </div>
+        )}
+      </div>
 
       {/* Status bar */}
       <div

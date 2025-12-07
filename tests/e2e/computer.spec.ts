@@ -153,4 +153,35 @@ test.describe('WireOS Computer', () => {
     // Fail if there were errors
     expect(errors.length).toBe(0);
   });
+
+  test('installs to HDD and boots without floppy', async ({ page }) => {
+    await page.goto('/');
+
+    // Insert the WireOS floppy and boot to the shell
+    await page.getByRole('button', { name: 'Insert WireOS Disk' }).click();
+    await page.getByRole('button', { name: 'Start' }).click();
+
+    const terminal = page.getByTestId('terminal-screen');
+    await expect(terminal).toContainText('WireOS v1', { timeout: 10000 });
+
+    // Run INSTALL to copy the bootable image to the HDD
+    const terminalContainer = page.locator('[tabindex="0"]').first();
+    await terminalContainer.click();
+    await page.keyboard.type('INSTALL');
+    await page.keyboard.press('Enter');
+
+    await expect(terminal).toContainText('Done!', { timeout: 20000 });
+
+    // Stop the running machine and give the disk a moment to flush
+    await page.getByRole('button', { name: 'Stop' }).click();
+    await page.waitForTimeout(300);
+
+    // Reload to simulate a reboot with only the HDD present
+    await page.reload();
+    await page.getByRole('button', { name: 'Start' }).click();
+
+    const rebootTerminal = page.getByTestId('terminal-screen');
+    await expect(rebootTerminal).toContainText('WireOS v1', { timeout: 10000 });
+    await expect(rebootTerminal).not.toContainText('NO BOOT');
+  });
 });

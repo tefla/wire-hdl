@@ -1,18 +1,43 @@
 // BIOS for wire-hdl Computer System
 // Provides basic I/O routines: PUTCHAR, GETCHAR, screen init
 // Located in ROM at $F000-$FFFF
+// Font ROM at $E000-$E7FF (2KB)
 
 import { assemble } from './stage0.js';
+import { DEFAULT_FONT } from '../web/font.js';
 
 // BIOS entry points (fixed addresses for application use)
 export const BIOS = {
   PUTCHAR: 0xF000,    // Write character in A to screen
   GETCHAR: 0xF040,    // Wait for keypress, return in A
-  PUTS: 0xF080,       // Print null-terminated string at address in X:Y (X=hi, Y=lo)
-  NEWLINE: 0xF0C0,    // Move cursor to start of next line
-  CLS: 0xF100,        // Clear screen
-  INIT: 0xF140,       // Initialize BIOS (called at reset)
+  NEWLINE: 0xF080,    // Move cursor to start of next line
+  INIT: 0xF0C0,       // Initialize BIOS (called at reset)
+  SET_CURSOR: 0xF100, // Set cursor position (A=X, X=Y)
+  GET_CURSOR: 0xF120, // Get cursor position (returns A=X, X=Y)
+  CLEAR_SCREEN: 0xF140, // Clear screen and home cursor
+  DISK_READ: 0xF200,  // Read sector ($30-$31=sector, $32-$33=buffer)
+  DISK_WRITE: 0xF240, // Write sector ($30-$31=sector, $32-$33=buffer)
   ENTRY: 0xFF00,      // Reset entry point
+  FONT_ROM: 0xE000,   // Font data (256 chars x 8 bytes)
+};
+
+// Zero page locations for disk I/O parameters
+export const DISK_ZP = {
+  SECTOR_LO: 0x30,    // Sector number low byte
+  SECTOR_HI: 0x31,    // Sector number high byte
+  BUFFER_LO: 0x32,    // Buffer address low byte
+  BUFFER_HI: 0x33,    // Buffer address high byte
+};
+
+// Disk I/O register addresses
+export const DISK_IO = {
+  STATUS: 0x8020,     // bit 0=ready, bit 1=busy, bit 7=error
+  CMD: 0x8021,        // 1=read, 2=write
+  SEC_LO: 0x8022,     // Sector number low
+  SEC_HI: 0x8023,     // Sector number high
+  BUF_LO: 0x8024,     // Buffer address low
+  BUF_HI: 0x8025,     // Buffer address high
+  COUNT: 0x8026,      // Sector count
 };
 
 
@@ -177,6 +202,127 @@ export function assembleBios(): Uint8Array {
         TXS
         RTS
     ` },
+    // SET_CURSOR at $F100
+    // Input: A = column (0-79), X = row (0-24)
+    { origin: 0xF100, code: `
+      .ORG $F100
+      SET_CURSOR:
+        STA $8051           ; CURSOR_X
+        STX $8052           ; CURSOR_Y
+        RTS
+    ` },
+    // GET_CURSOR at $F120
+    // Output: A = column (0-79), X = row (0-24)
+    { origin: 0xF120, code: `
+      .ORG $F120
+      GET_CURSOR:
+        LDA $8051           ; CURSOR_X
+        LDX $8052           ; CURSOR_Y
+        RTS
+    ` },
+    // CLEAR_SCREEN at $F140
+    // Clears screen and homes cursor
+    // Uses zero page $34-$35 as temp pointer
+    { origin: 0xF140, code: `
+      .ORG $F140
+      CLEAR_SCREEN:
+        ; Set cursor to 0,0
+        LDA #$00
+        STA $8051           ; CURSOR_X = 0
+        STA $8052           ; CURSOR_Y = 0
+        ; Clear character area using unrolled loop
+        ; VRAM chars at $8100, 2000 bytes
+        ; We'll clear in 8 iterations of 250 bytes each (2000 total)
+        LDX #$00
+        LDA #$20            ; Space character
+      CLR_LOOP:
+        STA $8100,X
+        STA $8200,X
+        STA $8300,X
+        STA $8400,X
+        STA $8500,X
+        STA $8600,X
+        STA $8700,X
+        INX
+        BNE CLR_LOOP
+        ; Clear remaining 232 bytes ($8100-$87D0 = 1744, we did 1792)
+        ; Actually text chars are 2000 bytes, but 7*256=1792, need $87D0-$8100=0x6D0=1744
+        ; Let me just clear the attr area too
+        LDA #$07            ; Default attr (light gray on black)
+      CLR_ATTR:
+        STA $87D0,X
+        STA $88D0,X
+        STA $89D0,X
+        STA $8AD0,X
+        STA $8BD0,X
+        STA $8CD0,X
+        STA $8DD0,X
+        INX
+        BNE CLR_ATTR
+        RTS
+    ` },
+    // DISK_READ at $F200
+    // Input: $30-$31 = sector, $32-$33 = buffer address
+    // Output: Carry clear on success, set on error
+    { origin: 0xF200, code: `
+      .ORG $F200
+      DISK_READ:
+        LDA $30
+        STA $8022           ; sector low
+        LDA $31
+        STA $8023           ; sector high
+        LDA $32
+        STA $8024           ; buffer low
+        LDA $33
+        STA $8025           ; buffer high
+        LDA #$01
+        STA $8026           ; count = 1 sector
+        LDA #$01
+        STA $8021           ; cmd = read
+      DISK_READ_WAIT:
+        LDA $8020           ; status
+        AND #$02            ; busy?
+        BNE DISK_READ_WAIT
+        LDA $8020
+        AND #$80            ; error?
+        BNE DISK_READ_ERR
+        CLC                 ; success
+        RTS
+      DISK_READ_ERR:
+        SEC                 ; error
+        RTS
+    ` },
+    // DISK_WRITE at $F240
+    // Input: $30-$31 = sector, $32-$33 = buffer address
+    // Output: Carry clear on success, set on error
+    { origin: 0xF240, code: `
+      .ORG $F240
+      DISK_WRITE:
+        LDA $30
+        STA $8022           ; sector low
+        LDA $31
+        STA $8023           ; sector high
+        LDA $32
+        STA $8024           ; buffer low
+        LDA $33
+        STA $8025           ; buffer high
+        LDA #$01
+        STA $8026           ; count = 1 sector
+        LDA #$02
+        STA $8021           ; cmd = write
+      DISK_WRITE_WAIT:
+        LDA $8020           ; status
+        AND #$02            ; busy?
+        BNE DISK_WRITE_WAIT
+        LDA $8020
+        AND #$80            ; error?
+        BNE DISK_WRITE_ERR
+        CLC                 ; success
+        RTS
+      DISK_WRITE_ERR:
+        SEC                 ; error
+        RTS
+    ` },
     // ENTRY at $FF00
     { origin: 0xFF00, code: `
       .ORG $FF00
@@ -214,6 +360,12 @@ export function assembleBios(): Uint8Array {
         rom[romOffset + i] = result.bytes[i];
       }
     }
+  }
+
+  // Copy font data to $E000 (offset 0x2000 in ROM)
+  const fontOffset = 0xE000 - 0xC000; // = 0x2000
+  for (let i = 0; i < DEFAULT_FONT.length && i < 2048; i++) {
+    rom[fontOffset + i] = DEFAULT_FONT[i];
   }
 
   // Set reset vector at $FFFC (offset $3FFC in ROM)

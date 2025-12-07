@@ -715,7 +715,7 @@ describe('Shell Bootstrap via Hex Loader', () => {
     const { bytes, origin } = assembleShell();
     expect(origin).toBe(0x0800);
     expect(bytes.length).toBeGreaterThan(100);
-    expect(bytes.length).toBeLessThan(1000);
+    expect(bytes.length).toBeLessThan(1500); // Shell includes INSTALL command
     console.log(`Shell size: ${bytes.length} bytes`);
   });
 
