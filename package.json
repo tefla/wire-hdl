@@ -10,7 +10,9 @@
     "build": "tsc",
     "build:web": "vite build",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:debug": "playwright test --debug"
   },
   "keywords": [
     "6502",
@@ -22,6 +24,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@types/node": "^20.10.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

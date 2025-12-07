@@ -23,53 +23,57 @@ export function Terminal({ onKeyPress, diskActive }: TerminalProps) {
     return () => clearInterval(interval);
   }, []);
 
-  // Output character
+  // Output character - uses refs to avoid React state update race conditions
+  const cursorXRef = useRef(0);
+  const cursorYRef = useRef(0);
+
   const outputChar = useCallback((char: number) => {
-    setLines((prev) => {
-      const newLines = [...prev];
-
-      if (char === 0x0d || char === 0x0a) {
-        // Newline
-        setCursorX(0);
-        setCursorY((y) => {
-          if (y >= ROWS - 1) {
-            // Scroll
-            setLines((l) => [...l.slice(1), '']);
-            return y;
-          }
-          return y + 1;
-        });
-      } else if (char === 0x08) {
-        // Backspace
-        setCursorX((x) => Math.max(0, x - 1));
-      } else if (char >= 0x20 && char < 0x7f) {
-        // Printable character
-        const ch = String.fromCharCode(char);
-        setCursorY((cy) => {
-          setCursorX((cx) => {
-            const line = newLines[cy] || '';
-            const padded = line.padEnd(cx, ' ');
-            newLines[cy] = padded.substring(0, cx) + ch + padded.substring(cx + 1);
-
-            if (cx >= COLS - 1) {
-              // Wrap to next line
-              setCursorY((y) => {
-                if (y >= ROWS - 1) {
-                  setLines((l) => [...l.slice(1), '']);
-                  return y;
-                }
-                return y + 1;
-              });
-              return 0;
-            }
-            return cx + 1;
-          });
-          return cy;
-        });
+    if (char === 0x0d || char === 0x0a) {
+      // Newline
+      cursorXRef.current = 0;
+      setCursorX(0);
+      if (cursorYRef.current >= ROWS - 1) {
+        // Scroll
+        setLines((l) => [...l.slice(1), '']);
+      } else {
+        cursorYRef.current++;
+        setCursorY(cursorYRef.current);
       }
+    } else if (char === 0x08) {
+      // Backspace
+      if (cursorXRef.current > 0) {
+        cursorXRef.current--;
+        setCursorX(cursorXRef.current);
+      }
+    } else if (char >= 0x20 && char < 0x7f) {
+      // Printable character
+      const ch = String.fromCharCode(char);
+      const cx = cursorXRef.current;
+      const cy = cursorYRef.current;
 
-      return newLines;
-    });
+      setLines((prev) => {
+        const newLines = [...prev];
+        const line = newLines[cy] || '';
+        const padded = line.padEnd(cx, ' ');
+        newLines[cy] = padded.substring(0, cx) + ch + padded.substring(cx + 1);
+        return newLines;
+      });
+
+      // Advance cursor
+      if (cx >= COLS - 1) {
+        cursorXRef.current = 0;
+        setCursorX(0);
+        if (cursorYRef.current >= ROWS - 1) {
+          setLines((l) => [...l.slice(1), '']);
+        } else {
+          cursorYRef.current++;
+          setCursorY(cursorYRef.current);
+        }
+      } else {
+        cursorXRef.current++;
+        setCursorX(cursorXRef.current);
+      }
+    }
   }, []);
 
   // Expose outputChar to parent via ref-like pattern
@@ -146,7 +150,7 @@ export function Terminal({ onKeyPress, diskActive }: TerminalProps) {
       />
 
       {/* Screen content */}
-      <div style={{ position: 'relative' }}>
+      <div data-testid="terminal-screen" style={{ position: 'relative' }}>
         {lines.map((line, y) => (
           <div key={y} style={{ height: '16.8px', whiteSpace: 'pre' }}>
             {line.padEnd(COLS, ' ').split('').map((ch, x) => (

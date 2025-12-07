@@ -54,9 +54,6 @@ export class Computer {
   private diskCount = 0;
   private diskBusy = false;
 
-  // I/O shadow registers (for writes)
-  private ioRegs = new Uint8Array(256);
-
   // Execution state
   private running = false;
   private animationFrame: number | null = null;
@@ -72,6 +69,9 @@ export class Computer {
 
     // Create CPU with shared memory
     this.cpu = new CPU6502(this.memory);
+
+    // Reset CPU to read reset vector and start at $F800
+    this.cpu.reset();
   }
 
   private loadRom(): void {
@@ -95,13 +95,11 @@ export class Computer {
 
   // Process any pending I/O
   private processIO(): void {
-    // Handle serial output by monitoring writes to SERIAL_DATA
+    // Handle serial output - check if any character was written
     const serialData = this.memory[IO.SERIAL_DATA];
-    if (serialData !== this.ioRegs[IO.SERIAL_DATA - MEM.IO_START] && serialData !== 0) {
+    if (serialData !== 0) {
       this.callbacks.onOutput(serialData);
-      this.ioRegs[IO.SERIAL_DATA - MEM.IO_START] = serialData;
-      // Clear after read
-      this.memory[IO.SERIAL_DATA] = 0;
+      this.memory[IO.SERIAL_DATA] = 0; // Clear after output
     }
 
     // Handle keyboard status
@@ -205,10 +203,8 @@ export class Computer {
     for (let i = 0; i < cyclesPerFrame && this.running; i++) {
       this.cpu.step();
 
-      // Check I/O every 100 instructions
-      if (i % 100 === 0) {
-        this.processIO();
-      }
+      // Check I/O every instruction to catch all serial output
+      this.processIO();
     }
 
     this.animationFrame = requestAnimationFrame(this.runLoop);
