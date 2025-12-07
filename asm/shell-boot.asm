@@ -14,6 +14,11 @@
 ;   RUN name - Load and run .COM file
 ;   (or just type filename to run it)
 ;
+; Disk layout assumptions:
+;   Directory occupies 3 sectors starting at DIR_START. We scan all three so
+;   it works whether the first directory sector is at 2 (HDD tests) or 3
+;   (floppy layout with two shell continuation sectors).
+;
 ; Memory usage:
 ;   $0300-$033F: Command buffer (64 bytes)
 ;   $0400-$05FF: Disk buffer (512 bytes)
@@ -21,6 +26,12 @@
 ; ============================================================
 
 .ORG $0800
+
+; ============================================================
+; Constants
+; ============================================================
+DIR_START  = $02            ; First directory sector to scan
+DIR_SECTS  = $03            ; Number of directory sectors
 
 ; ============================================================
 ; Entry point
@@ -389,9 +400,14 @@ CMD_MEM:
 ;   $0E-$0F: File size
 ; ============================================================
 CMD_DIR:
-    ; Read directory sector 3 into buffer at $0400
-    ; (Sectors 1-2 contain shell continuation code)
-    LDA #$03            ; Sector 3
+    ; Read each directory sector into buffer at $0400
+    LDA #DIR_START      ; Current sector
+    STA $38
+    LDA #DIR_SECTS
+    STA $39             ; Remaining sectors
+
+DIR_SECTOR:
+    LDA $38             ; Sector low
     STA $30
     LDA #$00
     STA $31
@@ -472,6 +488,13 @@ DIR_NEXT:
     CPX #$10            ; 16 entries per sector
     BNE DIR_LOOP
 
+    ; Next directory sector
+    INC $38
+    DEC $39
+    BEQ DIR_DONE
+    JMP DIR_SECTOR
+
+DIR_DONE:
     RTS
 
 DIR_ERR:
@@ -514,9 +537,14 @@ PN_DIGIT:
 ; Loads file to $0800 and jumps to it
 ; ============================================================
 CMD_RUN:
-    ; First, read directory sector 3
-    ; (Sectors 1-2 contain shell continuation code)
-    LDA #$03            ; Sector 3
+    ; Iterate over directory sectors
+    LDA #DIR_START
+    STA $38             ; Current sector
+    LDA #DIR_SECTS
+    STA $39             ; Remaining sectors
+
+RUN_SECTOR:
+    LDA $38             ; Sector to read
     STA $30
     LDA #$00
     STA $31
@@ -525,7 +553,7 @@ CMD_RUN:
     LDA #$04
     STA $33
     JSR $F200           ; DISK_READ
-    BCS RUN_NOTFOUND
+    BCS RUN_NEXT_SECTOR
 
     ; Search directory for matching filename
     LDX #$00            ; Entry index
@@ -609,6 +637,12 @@ RUN_NEXT_ENTRY:
     INX
     CPX #$10            ; 16 entries per sector
     BNE RUN_SEARCH
+
+RUN_NEXT_SECTOR:
+    INC $38
+    DEC $39
+    BEQ RUN_NOTFOUND
+    JMP RUN_SECTOR
 
 RUN_NOTFOUND:
     ; Print "?"
