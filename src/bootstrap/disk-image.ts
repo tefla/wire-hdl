@@ -17,6 +17,7 @@
 import { assembleShell, SHELL_ENTRY } from './shell.js';
 import { assembleStage0 } from './asm0.js';
 import { assembleEdit } from './edit.js';
+import { assemble } from '../assembler/stage0.js';
 import { WIREFS } from '../system/wirefs.js';
 import { DISK } from '../system/disk.js';
 import { createBootSector } from './boot-loader.js';
@@ -25,6 +26,8 @@ import { createBootSector } from './boot-loader.js';
 import HELLO_ASM from '../../asm/hello.asm?raw';
 import TEST_ASM from '../../asm/test.asm?raw';
 import BEEP_ASM from '../../asm/beep.asm?raw';
+import CD_ASM from '../../asm/cd.asm?raw';
+import MKDIR_ASM from '../../asm/mkdir.asm?raw';
 
 // Convert string to Uint8Array
 function textToBytes(text: string): Uint8Array {
@@ -156,6 +159,8 @@ export function createFloppyDisk(): Uint8Array[] {
   const shellResult = assembleShell();
   const asm0Result = assembleStage0();
   const editResult = assembleEdit();
+  const cdResult = assemble(CD_ASM);
+  const mkdirResult = assemble(MKDIR_ASM);
 
   // Calculate how many sectors shell needs
   // Boot sector has 504 bytes of code (512 - 8 byte header)
@@ -176,6 +181,8 @@ export function createFloppyDisk(): Uint8Array[] {
     { name: 'SHELL', ext: 'COM', data: shellResult.bytes, startSector: dataStart },
     { name: 'ASM0', ext: 'COM', data: asm0Result.bytes },
     { name: 'EDIT', ext: 'COM', data: editResult.bytes },
+    { name: 'CD', ext: 'COM', data: cdResult.bytes },
+    { name: 'MKDIR', ext: 'COM', data: mkdirResult.bytes },
     { name: 'HELLO', ext: 'ASM', data: textToBytes(HELLO_ASM) },
     { name: 'TEST', ext: 'ASM', data: textToBytes(TEST_ASM) },
     { name: 'BEEP', ext: 'ASM', data: textToBytes(BEEP_ASM) },

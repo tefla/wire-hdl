@@ -32,6 +32,10 @@
 ; ============================================================
 DIR_START  = $02            ; First directory sector to scan
 DIR_SECTS  = $03            ; Number of directory sectors
+ENV_BASE   = $0200          ; Environment block for current path
+ENV_LEN    = ENV_BASE       ; Byte: length of current path
+ENV_PATH   = ENV_BASE+1     ; Path storage (max 63 chars)
+ENV_MAX    = 63
 
 ; ============================================================
 ; Entry point
@@ -39,6 +43,7 @@ DIR_SECTS  = $03            ; Number of directory sectors
 SHELL_START:
     ; Print welcome banner
     JSR PRINT_BANNER
+    JSR INIT_ENV
 
 ; Main command loop
 MAIN_LOOP:
@@ -74,11 +79,41 @@ PRINT_BANNER:
     RTS
 
 ; ============================================================
-; PRINT_PROMPT - Print "A> "
+; INIT_ENV - Ensure env path is initialized
+; ============================================================
+INIT_ENV:
+    LDA ENV_LEN
+    CMP #$01
+    BCC IE_SETROOT
+    CMP #ENV_MAX
+    BCC IE_DONE
+IE_SETROOT:
+    LDA #$01
+    STA ENV_LEN
+    LDA #'/'
+    STA ENV_PATH
+IE_DONE:
+    RTS
+
+; PRINT_PROMPT - Print "<path> > "
 ; ============================================================
 PRINT_PROMPT:
-    LDA #$41            ; 'A'
+    LDY ENV_LEN
+    BEQ PP_ROOT
+    LDX #$00
+PP_LOOP:
+    LDA ENV_PATH,X
     JSR $F000
+    INX
+    DEY
+    BNE PP_LOOP
+    JMP PP_ARROW
+
+PP_ROOT:
+    LDA #'/'
+    JSR $F000
+
+PP_ARROW:
     LDA #$3E            ; '>'
     JSR $F000
     LDA #$20            ; ' '

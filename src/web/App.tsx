@@ -11,6 +11,9 @@ export function App() {
   const [diskActive, setDiskActive] = useState(false);
   const [floppyActive, setFloppyActive] = useState(false);
   const [floppyInserted, setFloppyInserted] = useState(false);
+  const [floppyImage, setFloppyImage] = useState<'wireos' | 'blank'>('wireos');
+  const [volumes, setVolumes] = useState<string[]>([]);
+  const [activeVolume, setActiveVolume] = useState('');
   const [cpuState, setCpuState] = useState({ pc: 0, a: 0, x: 0, y: 0, sp: 0, p: 0 });
   const [graphics, setGraphics] = useState<GraphicsCard | null>(null);
 
@@ -18,12 +21,19 @@ export function App() {
   const diskRef = useRef<PersistentDisk | null>(null);
   const displayContainerRef = useRef<HTMLDivElement | null>(null);
 
+  const refreshVolumeState = useCallback(() => {
+    if (!diskRef.current) return;
+    setVolumes(diskRef.current.listVolumes());
+    setActiveVolume(diskRef.current.getActiveVolume());
+  }, []);
+
   // Initialize on mount
   useEffect(() => {
     async function init() {
       const disk = new PersistentDisk();
       await disk.init();
       diskRef.current = disk;
+      refreshVolumeState();
 
       const computer = new Computer(disk, {
         onOutput: (char) => {
@@ -51,7 +61,7 @@ export function App() {
     return () => {
       computerRef.current?.stop();
     };
-  }, []);
+  }, [refreshVolumeState]);
 
   // Update CPU state periodically
   useEffect(() => {
@@ -118,12 +128,51 @@ export function App() {
     }
   }, []);
 
+  const handleSelectVolume = useCallback(
+    async (volume: string) => {
+      if (!diskRef.current) return;
+      await diskRef.current.setActiveVolume(volume);
+      refreshVolumeState();
+    },
+    [refreshVolumeState]
+  );
+
+  const handleAddVolume = useCallback(async () => {
+    if (!diskRef.current) return;
+    const name = prompt('Name for new HDD volume?');
+    if (!name) return;
+    const clean = name.trim();
+    if (!clean) return;
+    await diskRef.current.createVolume(clean, true);
+    refreshVolumeState();
+  }, [refreshVolumeState]);
+
+  const handleDeleteVolume = useCallback(async () => {
+    if (!diskRef.current) return;
+    if (volumes.length <= 1) return;
+    if (!confirm(`Delete HDD volume "${activeVolume}"? This cannot be undone.`)) return;
+    await diskRef.current.deleteVolume(activeVolume);
+    refreshVolumeState();
+  }, [activeVolume, refreshVolumeState, volumes.length]);
+
+  const buildFloppy = useCallback(() => {
+    if (floppyImage === 'wireos') {
+      return createFloppyDisk();
+    }
+    const sectors: Uint8Array[] = [];
+    for (let i = 0; i < 200; i++) {
+      sectors.push(new Uint8Array(512));
+    }
+    return sectors;
+  }, [floppyImage]);
+
   const handleClearDisk = useCallback(async () => {
     if (diskRef.current && confirm('Clear all disk data? This cannot be undone.')) {
       await diskRef.current.clear();
+      refreshVolumeState();
       alert('Disk cleared');
     }
-  }, []);
+  }, [refreshVolumeState]);
 
   const handleExportDisk = useCallback(async () => {
     if (diskRef.current) {
@@ -145,11 +194,12 @@ export function App() {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file && diskRef.current) {
         await diskRef.current.importDisk(file);
+        refreshVolumeState();
         alert('Disk imported. Reset the computer to load.');
       }
     };
     input.click();
-  }, []);
+  }, [refreshVolumeState]);
 
   const handleFloppyToggle = useCallback(() => {
     if (!computerRef.current) return;
@@ -158,11 +208,11 @@ export function App() {
       computerRef.current.ejectFloppy();
       setFloppyInserted(false);
     } else {
-      const floppySectors = createFloppyDisk();
+      const floppySectors = buildFloppy();
       computerRef.current.insertFloppy(floppySectors);
       setFloppyInserted(true);
     }
-  }, [floppyInserted]);
+  }, [buildFloppy, floppyInserted]);
 
   const hex = (n: number, digits = 4) => n.toString(16).toUpperCase().padStart(digits, '0');
 
@@ -183,20 +233,71 @@ export function App() {
           justifyContent: 'space-between',
           alignItems: 'center',
           marginBottom: '16px',
+          gap: '12px',
+          flexWrap: 'wrap',
         }}
       >
         <h1 style={{ color: '#33ff33', fontSize: '24px', fontWeight: 'normal' }}>
           WireOS Computer
         </h1>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <Button onClick={handleFloppyToggle}>
-            {floppyInserted ? 'Eject Floppy' : 'Insert WireOS Disk'}
-          </Button>
-          {floppyInserted && (
-            <span style={{ color: floppyActive ? '#ffff00' : '#33ff33', fontSize: '12px' }}>
-              A:
-            </span>
-          )}
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ color: '#33ff33', fontSize: '12px' }}>HDD:</span>
+            <select
+              value={activeVolume}
+              onChange={(e) => handleSelectVolume(e.target.value)}
+              style={{
+                backgroundColor: '#0f172a',
+                color: '#33ff33',
+                border: '1px solid #33ff33',
+                borderRadius: '4px',
+                padding: '6px 8px',
+              }}
+            >
+              {volumes.map((vol) => (
+                <option key={vol} value={vol}>
+                  {vol}
+                </option>
+              ))}
+            </select>
+            <Button onClick={handleAddVolume}>New HDD</Button>
+            {volumes.length > 1 && <Button onClick={handleDeleteVolume}>Delete HDD</Button>}
+          </div>
+
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <select
+              value={floppyImage}
+              onChange={(e) => setFloppyImage(e.target.value as 'wireos' | 'blank')}
+              disabled={floppyInserted}
+              style={{
+                backgroundColor: '#0f172a',
+                color: '#33ff33',
+                border: '1px solid #33ff33',
+                borderRadius: '4px',
+                padding: '6px 8px',
+              }}
+            >
+              <option value="wireos">WireOS install</option>
+              <option value="blank">Blank floppy</option>
+            </select>
+            <Button onClick={handleFloppyToggle}>
+              {floppyInserted ? 'Eject Floppy' : 'Insert Floppy'}
+            </Button>
+            {floppyInserted && (
+              <span style={{ color: floppyActive ? '#ffff00' : '#33ff33', fontSize: '12px' }}>
+                A:
+              </span>
+            )}
+          </div>
+
           {!running ? (
             <Button onClick={handleStart}>Start</Button>
           ) : (
@@ -248,7 +349,8 @@ export function App() {
       >
         <div>
           PC:{hex(cpuState.pc)} A:{hex(cpuState.a, 2)} X:{hex(cpuState.x, 2)} Y:
-          {hex(cpuState.y, 2)} SP:{hex(cpuState.sp, 2)} P:{hex(cpuState.p, 2)}
+          {hex(cpuState.y, 2)} SP:{hex(cpuState.sp, 2)} P:{hex(cpuState.p, 2)} | HDD:
+          {activeVolume || '...'} | Floppy:{floppyInserted ? floppyImage : 'none'}
         </div>
         <div style={{ display: 'flex', gap: '16px' }}>
           <button

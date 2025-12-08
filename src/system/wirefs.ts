@@ -1,5 +1,5 @@
 // WireFS - Simple Filesystem for Wire-HDL Computer
-// CP/M-like filesystem with 8.3 filenames
+// CP/M-like filesystem with 8.3 filenames and lightweight directories
 //
 // Disk Layout:
 //   Sector 0        Boot sector
@@ -15,8 +15,9 @@
 //   $0E-$0F File size in bytes (low 16 bits)
 //   $10-$11 File size in bytes (high 16 bits)
 //   $12-$13 Sector count (little-endian)
-//   $14     Attributes (0x01=readonly, 0x02=hidden, 0x04=system)
-//   $15-$1F Reserved (zeros)
+//   $14     Attributes (0x01=readonly, 0x02=hidden, 0x04=system, 0x10=directory)
+//   $15-$16 Parent entry index (little-endian, 0xFFFF = root)
+//   $17-$1F Reserved (zeros)
 
 import { Disk, DISK } from './disk.js';
 
@@ -35,6 +36,7 @@ export const WIREFS = {
   ENTRY_SIZE: 32,
   NAME_LEN: 8,
   EXT_LEN: 3,
+  ROOT_PARENT: 0xffff,
 
   // Entry status
   STATUS_DELETED: 0x00,
@@ -45,6 +47,7 @@ export const WIREFS = {
   ATTR_READONLY: 0x01,
   ATTR_HIDDEN: 0x02,
   ATTR_SYSTEM: 0x04,
+  ATTR_DIRECTORY: 0x10,
 };
 
 // Directory entry structure
@@ -56,6 +59,7 @@ export interface DirEntry {
   sizeBytes: number; // Full 32-bit size
   sizeSectors: number;
   attributes: number;
+  parentIndex: number; // 0xffff means root
 }
 
 // File handle for open files
@@ -106,6 +110,7 @@ export class WireFS {
         sizeBytes: 0,
         sizeSectors: 0,
         attributes: 0,
+        parentIndex: WIREFS.ROOT_PARENT,
       });
     }
 
@@ -185,8 +190,10 @@ export class WireFS {
     const sizeBytes = sizeLo | (sizeHi << 16);
     const sizeSectors = data[offset + 0x12] | (data[offset + 0x13] << 8);
     const attributes = data[offset + 0x14];
+    const parentRaw = data[offset + 0x15] | (data[offset + 0x16] << 8);
+    const parentIndex = parentRaw === 0 ? WIREFS.ROOT_PARENT : parentRaw;
 
-    return { status, name, ext, startSector, sizeBytes, sizeSectors, attributes };
+    return { status, name, ext, startSector, sizeBytes, sizeSectors, attributes, parentIndex };
   }
 
   /**
@@ -222,8 +229,13 @@ export class WireFS {
     // Attributes
     data[offset + 0x14] = entry.attributes;
 
+    // Parent entry index (little-endian). 0xFFFF means root.
+    const parent = entry.parentIndex ?? WIREFS.ROOT_PARENT;
+    data[offset + 0x15] = parent & 0xff;
+    data[offset + 0x16] = (parent >> 8) & 0xff;
+
     // Reserved bytes (zeros)
-    for (let i = 0x15; i < WIREFS.ENTRY_SIZE; i++) {
+    for (let i = 0x17; i < WIREFS.ENTRY_SIZE; i++) {
       data[offset + i] = 0;
     }
   }
@@ -322,23 +334,106 @@ export class WireFS {
   }
 
   /**
-   * Find a file in the directory
+   * Normalize a path into segments, resolving "." and ".."
    */
-  findFile(filename: string): { entry: DirEntry; index: number } | null {
-    const { name, ext } = this.parseFilename(filename);
+  private normalizePath(path: string, cwd: string = '/'): string[] {
+    const trimmed = path.trim();
+    const baseSegments = path.startsWith('/') ? [] : this.normalizePathParts(cwd);
+    const raw = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+    const parts = raw.split('/').filter(Boolean);
 
+    for (const part of parts) {
+      if (part === '.') continue;
+      if (part === '..') {
+        if (baseSegments.length > 0) {
+          baseSegments.pop();
+        }
+        continue;
+      }
+      baseSegments.push(part);
+    }
+
+    return baseSegments;
+  }
+
+  /**
+   * Split a path string (already absolute or cwd) into uppercase segments
+   */
+  private normalizePathParts(input: string): string[] {
+    const raw = input.trim();
+    if (raw === '' || raw === '/') return [];
+    const cleaned = raw.startsWith('/') ? raw.slice(1) : raw;
+    return cleaned
+      .split('/')
+      .filter(Boolean)
+      .map((p) => p.toUpperCase());
+  }
+
+  /**
+   * Find an entry in a specific directory by 8.3 name
+   */
+  private findInDirectory(
+    parentIndex: number,
+    name: string,
+    ext: string
+  ): { entry: DirEntry; index: number } | null {
     for (let i = 0; i < this.directory.length; i++) {
       const entry = this.directory[i];
       if (
         entry.status === WIREFS.STATUS_ACTIVE &&
+        entry.parentIndex === parentIndex &&
         entry.name === name &&
         entry.ext === ext
       ) {
         return { entry, index: i };
       }
     }
+    return null;
+  }
+
+  /**
+   * Resolve a path to a directory entry. Returns root for "/".
+   */
+  private resolvePath(path: string, cwd: string = '/'): { entry: DirEntry; index: number } | null {
+    const segments = this.normalizePath(path, cwd);
+    let parentIndex = WIREFS.ROOT_PARENT;
+    if (segments.length === 0) {
+      return {
+        entry: {
+          status: WIREFS.STATUS_ACTIVE,
+          name: '',
+          ext: '',
+          startSector: 0,
+          sizeBytes: 0,
+          sizeSectors: 0,
+          attributes: WIREFS.ATTR_DIRECTORY,
+          parentIndex: WIREFS.ROOT_PARENT,
+        },
+        index: WIREFS.ROOT_PARENT,
+      };
+    }
+
+    for (let i = 0; i < segments.length; i++) {
+      const { name, ext } = this.parseFilename(segments[i]);
+      const found = this.findInDirectory(parentIndex, name, ext);
+      if (!found) return null;
+      parentIndex = found.index;
+      if (i === segments.length - 1) {
+        return found;
+      }
+      if ((found.entry.attributes & WIREFS.ATTR_DIRECTORY) === 0) {
+        return null; // Non-directory in middle of path
+      }
+    }
 
     return null;
+  }
+
+  /**
+   * Find a file in the directory
+   */
+  findFile(path: string, cwd: string = '/'): { entry: DirEntry; index: number } | null {
+    return this.resolvePath(path, cwd);
   }
 
   /**
@@ -357,18 +452,38 @@ export class WireFS {
   /**
    * List all active files
    */
-  listFiles(): DirEntry[] {
-    return this.directory.filter((e) => e.status === WIREFS.STATUS_ACTIVE);
+  listFiles(path: string = '/', cwd: string = '/'): DirEntry[] {
+    const resolved = this.resolvePath(path, cwd);
+    if (!resolved) return [];
+
+    const parentIndex = resolved.index;
+    if (resolved.entry && (resolved.entry.attributes & WIREFS.ATTR_DIRECTORY) === 0) {
+      return [];
+    }
+
+    return this.directory.filter(
+      (e) => e.status === WIREFS.STATUS_ACTIVE && e.parentIndex === parentIndex
+    );
   }
 
   /**
    * Create a new file
    */
-  createFile(filename: string, data: Uint8Array): boolean {
+  createFile(path: string, data: Uint8Array, cwd: string = '/'): boolean {
+    const segments = this.normalizePath(path, cwd);
+    if (segments.length === 0) return false;
+
+    const filename = segments.pop()!;
+    const parentPath = segments.length ? `/${segments.join('/')}` : '/';
+    const parent = this.resolvePath(parentPath, cwd);
+    if (!parent || (parent.entry.attributes & WIREFS.ATTR_DIRECTORY) === 0) {
+      return false;
+    }
+
     const { name, ext } = this.parseFilename(filename);
 
-    // Check if file already exists
-    if (this.findFile(filename)) {
+    // Check if file already exists in parent
+    if (this.findInDirectory(parent.index, name, ext)) {
       return false; // File exists
     }
 
@@ -390,6 +505,7 @@ export class WireFS {
         sizeBytes: 0,
         sizeSectors: 0,
         attributes: 0,
+        parentIndex: parent.index,
       };
       this.saveDirectory();
       return true;
@@ -428,6 +544,7 @@ export class WireFS {
       sizeBytes: data.length,
       sizeSectors: sectorsNeeded,
       attributes: 0,
+      parentIndex: parent.index,
     };
 
     // Save metadata
@@ -438,11 +555,48 @@ export class WireFS {
   }
 
   /**
+   * Create a new directory
+   */
+  createDirectory(path: string, cwd: string = '/'): boolean {
+    const segments = this.normalizePath(path, cwd);
+    if (segments.length === 0) return false; // cannot create root
+
+    const dirName = segments.pop()!;
+    const parentPath = segments.length ? `/${segments.join('/')}` : '/';
+    const parent = this.resolvePath(parentPath, cwd);
+    if (!parent || (parent.entry.attributes & WIREFS.ATTR_DIRECTORY) === 0) {
+      return false;
+    }
+
+    const { name, ext } = this.parseFilename(dirName);
+    if (this.findInDirectory(parent.index, name, ext)) {
+      return false; // exists
+    }
+
+    const entryIndex = this.findFreeEntry();
+    if (entryIndex < 0) return false;
+
+    this.directory[entryIndex] = {
+      status: WIREFS.STATUS_ACTIVE,
+      name,
+      ext,
+      startSector: 0,
+      sizeBytes: 0,
+      sizeSectors: 0,
+      attributes: WIREFS.ATTR_DIRECTORY,
+      parentIndex: parent.index,
+    };
+
+    this.saveDirectory();
+    return true;
+  }
+
+  /**
    * Read entire file contents
    */
-  readFile(filename: string): Uint8Array | null {
-    const found = this.findFile(filename);
-    if (!found) return null;
+  readFile(path: string, cwd: string = '/'): Uint8Array | null {
+    const found = this.findFile(path, cwd);
+    if (!found || (found.entry.attributes & WIREFS.ATTR_DIRECTORY) !== 0) return null;
 
     const { entry } = found;
     if (entry.sizeBytes === 0) {
@@ -469,11 +623,20 @@ export class WireFS {
   /**
    * Delete a file
    */
-  deleteFile(filename: string): boolean {
-    const found = this.findFile(filename);
+  deleteFile(path: string, cwd: string = '/'): boolean {
+    const found = this.findFile(path, cwd);
     if (!found) return false;
 
     const { entry, index } = found;
+    if (index === WIREFS.ROOT_PARENT) return false;
+
+    // For directories, ensure they are empty (no children)
+    if ((entry.attributes & WIREFS.ATTR_DIRECTORY) !== 0) {
+      const hasChildren = this.directory.some(
+        (e) => e.status === WIREFS.STATUS_ACTIVE && e.parentIndex === index
+      );
+      if (hasChildren) return false;
+    }
 
     // Free sectors
     for (let s = 0; s < entry.sizeSectors; s++) {
@@ -493,9 +656,9 @@ export class WireFS {
   /**
    * Open a file for reading/writing
    */
-  openFile(filename: string): number | null {
-    const found = this.findFile(filename);
-    if (!found) return null;
+  openFile(path: string, cwd: string = '/'): number | null {
+    const found = this.findFile(path, cwd);
+    if (!found || (found.entry.attributes & WIREFS.ATTR_DIRECTORY) !== 0) return null;
 
     const handle: FileHandle = {
       entry: { ...found.entry },
@@ -588,7 +751,10 @@ export class WireFS {
    * Get total file count
    */
   getFileCount(): number {
-    return this.directory.filter((e) => e.status === WIREFS.STATUS_ACTIVE).length;
+    return this.directory.filter(
+      (e) =>
+        e.status === WIREFS.STATUS_ACTIVE && (e.attributes & WIREFS.ATTR_DIRECTORY) === 0
+    ).length;
   }
 
   /**
@@ -602,28 +768,72 @@ export class WireFS {
   /**
    * Copy a file
    */
-  copyFile(srcFilename: string, dstFilename: string): boolean {
-    const data = this.readFile(srcFilename);
+  copyFile(srcPath: string, dstPath: string, cwd: string = '/'): boolean {
+    const data = this.readFile(srcPath, cwd);
     if (data === null) return false;
-    return this.createFile(dstFilename, data);
+    return this.createFile(dstPath, data, cwd);
   }
 
   /**
    * Rename a file
    */
-  renameFile(oldName: string, newName: string): boolean {
-    const found = this.findFile(oldName);
+  renameFile(oldPath: string, newPath: string, cwd: string = '/'): boolean {
+    const found = this.findFile(oldPath, cwd);
     if (!found) return false;
+    if (found.index === WIREFS.ROOT_PARENT) return false;
 
-    // Check if new name exists
-    if (this.findFile(newName)) return false;
+    const newSegments = this.normalizePath(newPath, cwd);
+    if (newSegments.length === 0) return false;
 
-    const { name, ext } = this.parseFilename(newName);
+    const newNameSegment = newSegments.pop()!;
+    const parentPath = newSegments.length ? `/${newSegments.join('/')}` : '/';
+    const parent = this.resolvePath(parentPath, cwd);
+    if (!parent || (parent.entry.attributes & WIREFS.ATTR_DIRECTORY) === 0) return false;
+
+    const { name, ext } = this.parseFilename(newNameSegment);
+    if (this.findInDirectory(parent.index, name, ext)) return false;
+
     this.directory[found.index].name = name;
     this.directory[found.index].ext = ext;
+    this.directory[found.index].parentIndex = parent.index;
 
     this.saveDirectory();
     return true;
+  }
+
+  /**
+   * Change directory. Returns normalized absolute path if it exists.
+   */
+  changeDirectory(path: string, cwd: string = '/'): string | null {
+    const resolved = this.resolvePath(path, cwd);
+    if (!resolved || (resolved.entry.attributes & WIREFS.ATTR_DIRECTORY) === 0) return null;
+    return this.getPathForEntry(resolved.index);
+  }
+
+  /**
+   * Build an absolute path for a directory entry index.
+   */
+  getPathForEntry(entryIndex: number): string {
+    if (entryIndex === WIREFS.ROOT_PARENT) return '/';
+    if (entryIndex < 0 || entryIndex >= this.directory.length) return '/';
+
+    const parts: string[] = [];
+    let current = entryIndex;
+    const guard = new Set<number>();
+
+    while (
+      current !== WIREFS.ROOT_PARENT &&
+      current >= 0 &&
+      current < this.directory.length &&
+      !guard.has(current)
+    ) {
+      guard.add(current);
+      const entry = this.directory[current];
+      parts.push(formatFilename(entry.name, entry.ext));
+      current = entry.parentIndex ?? WIREFS.ROOT_PARENT;
+    }
+
+    return `/${parts.reverse().join('/')}`;
   }
 }
 

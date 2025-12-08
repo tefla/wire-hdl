@@ -579,7 +579,7 @@ describe('Shell Direct Load Test', () => {
     computer.cpu.pc = 0x0800;
 
     // Run until we see prompt (which comes after banner)
-    const found = computer.runUntilOutput('A>', 100000);
+    const found = computer.runUntilOutput('/>', 100000);
     expect(found).toBe(true);
     expect(computer.output).toContain('WireOS v1');
   });
@@ -595,7 +595,7 @@ describe('Shell Direct Load Test', () => {
     computer.cpu.pc = 0x0800;
 
     // Run until prompt
-    computer.runUntilOutput('A>', 100000);
+    computer.runUntilOutput('/>', 100000);
     computer.clearOutput();
 
     // Test HELP - wait for MEM (last command in help output)
@@ -616,7 +616,7 @@ describe('Shell Direct Load Test', () => {
     computer.cpu.pc = 0x0800;
 
     // Run until prompt
-    computer.runUntilOutput('A>', 100000);
+    computer.runUntilOutput('/>', 100000);
     computer.clearOutput();
 
     // Test VER
@@ -636,7 +636,7 @@ describe('Shell Direct Load Test', () => {
     computer.cpu.pc = 0x0800;
 
     // Run until prompt
-    computer.runUntilOutput('A>', 100000);
+    computer.runUntilOutput('/>', 100000);
     computer.clearOutput();
 
     // Test MEM - wait for ROM: 16K which appears after RAM: 32K
@@ -657,7 +657,7 @@ describe('Shell Direct Load Test', () => {
     computer.cpu.pc = 0x0800;
 
     // Run until prompt
-    computer.runUntilOutput('A>', 100000);
+    computer.runUntilOutput('/>', 100000);
     computer.clearOutput();
 
     // Test HEX command
@@ -765,7 +765,7 @@ describe('Shell Bootstrap via Hex Loader', () => {
     console.log('PC:', computer.cpu.pc.toString(16));
     expect(found).toBe(true);
     expect(computer.output).toContain('WireOS v1');
-    expect(computer.output).toContain('A>');
+    expect(computer.output).toContain('/>');
   });
 
   // Helper to bootstrap shell
@@ -785,7 +785,7 @@ describe('Shell Bootstrap via Hex Loader', () => {
     computer.run(50000);
 
     computer.sendLine('E');
-    computer.runUntilOutput('A>', 500000);
+    computer.runUntilOutput('/>', 500000);
   }
 
   it('should respond to HELP command after bootstrap', () => {
