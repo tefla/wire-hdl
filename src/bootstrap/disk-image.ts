@@ -1,18 +1,32 @@
 // Floppy Disk Image Builder for WireOS
 // Creates a bootable floppy disk with shell and utilities
 //
-// Disk Layout (WireFS):
-//   Sector 0        Boot sector (magic "WF", entry point, etc.)
+// Standard WireFS Disk Layout (same for floppy and HDD):
+//   Sector 0        Boot sector (boot loader code)
 //   Sectors 1-3     Directory (48 entries × 32 bytes)
 //   Sectors 4-19    Allocation bitmap
 //   Sectors 20+     File data
 //
-// Files included:
-//   SHELL.COM   - WireOS Shell
+// Root files:
+//   SHELL.COM   - WireOS Shell (loaded by boot loader)
 //   ASM0.COM    - Stage 0 Assembler
 //   EDIT.COM    - Text Editor
-//   HELLO.ASM   - Hello World example source
-//   TEST.ASM    - Test program source
+//   CD.COM      - Change Directory
+//   MKDIR.COM   - Make Directory
+//   HELLO.ASM   - Hello World example
+//   TEST.ASM    - Test program example
+//   BEEP.ASM    - Sound example
+//
+// SRC/ directory (source code):
+//   SHELL.ASM   - Shell source
+//   ASM.ASM     - Full assembler source
+//   ASM0.ASM    - Stage 0 assembler source
+//   EDIT.ASM    - Editor source
+//   BOOTLOAD.ASM - Boot loader source
+//   HEXLOAD.ASM - Hex loader source
+//   CD.ASM      - CD command source
+//   MKDIR.ASM   - MKDIR command source
+//   HELLO.ASM   - Hello World source
 
 import { assembleShell, SHELL_ENTRY } from './shell.js';
 import { assembleStage0 } from './asm0.js';
@@ -20,7 +34,6 @@ import { assembleEdit } from './edit.js';
 import { assemble } from '../assembler/stage0.js';
 import { WIREFS } from '../system/wirefs.js';
 import { DISK } from '../system/disk.js';
-import { createBootSector } from './boot-loader.js';
 
 // Import ASM source files from /asm folder
 import HELLO_ASM from '../../asm/hello.asm?raw';
@@ -28,6 +41,13 @@ import TEST_ASM from '../../asm/test.asm?raw';
 import BEEP_ASM from '../../asm/beep.asm?raw';
 import CD_ASM from '../../asm/cd.asm?raw';
 import MKDIR_ASM from '../../asm/mkdir.asm?raw';
+// Source code for distribution
+import SHELL_ASM from '../../asm/shell-boot.asm?raw';
+import ASM_ASM from '../../asm/asm.asm?raw';
+import ASM0_ASM from '../../asm/asm0-boot.asm?raw';
+import EDIT_ASM from '../../asm/edit.asm?raw';
+import BOOTLOAD_ASM from '../../asm/boot-loader.asm?raw';
+import HEXLOAD_ASM from '../../asm/hex-loader.asm?raw';
 
 // Convert string to Uint8Array
 function textToBytes(text: string): Uint8Array {
@@ -48,11 +68,21 @@ const STATUS = {
   ACTIVE: 0x01,
 };
 
+// File attributes
+const ATTR = {
+  READONLY: 0x01,
+  HIDDEN: 0x02,
+  SYSTEM: 0x04,
+  DIRECTORY: 0x10,
+};
+
 interface FileEntry {
   name: string; // 8 chars max
   ext: string; // 3 chars max
   data: Uint8Array;
   startSector?: number;
+  isDirectory?: boolean;
+  parentIndex?: number;  // Entry index of parent directory (0xFFFF for root)
 }
 
 /**
@@ -90,12 +120,17 @@ function createDirEntry(
   data[0x11] = (size >> 24) & 0xff;
 
   // Sector count
-  const sectorCount = Math.ceil(size / DISK.SECTOR_SIZE);
+  const sectorCount = Math.ceil(size / DISK.SECTOR_SIZE) || 0;
   data[0x12] = sectorCount & 0xff;
   data[0x13] = (sectorCount >> 8) & 0xff;
 
-  // Attributes (0 = normal)
-  data[0x14] = 0x00;
+  // Attributes
+  data[0x14] = entry.isDirectory ? ATTR.DIRECTORY : 0x00;
+
+  // Parent entry index (0xFFFF for root)
+  const parentIndex = entry.parentIndex ?? 0xFFFF;
+  data[0x15] = parentIndex & 0xff;
+  data[0x16] = (parentIndex >> 8) & 0xff;
 
   // Reserved bytes are already 0
 
@@ -114,7 +149,7 @@ function createUnusedEntry(): Uint8Array {
 
 /**
  * Create allocation bitmap for the disk
- * Marks system sectors (0-19) and file sectors as used
+ * Marks system sectors and file sectors as used
  */
 function createBitmap(usedSectors: number[]): Uint8Array[] {
   const bitmapSectors: Uint8Array[] = [];
@@ -142,15 +177,51 @@ function createBitmap(usedSectors: number[]): Uint8Array[] {
 }
 
 /**
+ * Create a boot sector that loads SHELL.COM from the filesystem
+ *
+ * Boot sector format:
+ *   $00-$01  Magic "WF"
+ *   $02-$03  Entry point (where to jump after loading)
+ *   $04-$05  Load address (where to load SHELL.COM)
+ *   $06      Shell start sector (from directory)
+ *   $07      Shell sector count (from directory)
+ *   $08+     Boot code
+ */
+function createFilesystemBootSector(shellStartSector: number, shellSectorCount: number): Uint8Array {
+  const sector = new Uint8Array(512);
+
+  // Magic bytes
+  sector[0] = 0x57; // 'W'
+  sector[1] = 0x46; // 'F'
+
+  // Entry point (SHELL_ENTRY = $0800)
+  sector[2] = SHELL_ENTRY & 0xff;
+  sector[3] = (SHELL_ENTRY >> 8) & 0xff;
+
+  // Load address (same as entry point)
+  sector[4] = SHELL_ENTRY & 0xff;
+  sector[5] = (SHELL_ENTRY >> 8) & 0xff;
+
+  // Shell location info (for boot loader to use)
+  sector[6] = shellStartSector & 0xff;
+  sector[7] = shellSectorCount & 0xff;
+
+  // Boot code starts at offset 8
+  // This minimal boot code just signals that we need filesystem boot
+  // The ROM boot loader will read this and load SHELL.COM from the directory
+
+  return sector;
+}
+
+/**
  * Create a bootable WireOS floppy disk image
  * Returns array of sectors
  *
- * Boot Floppy Layout (different from standard WireFS):
- *   Sector 0        Boot sector (magic + first 504 bytes of shell)
- *   Sectors 1-N     Shell continuation (rest of shell code)
- *   After shell     Directory (3 sectors)
- *   After dir       Bitmap (16 sectors)
- *   After bitmap    File data (ASM0.COM etc, but NOT shell since it's in boot area)
+ * Standard WireFS Layout:
+ *   Sector 0        Boot sector
+ *   Sectors 1-3     Directory (48 entries)
+ *   Sectors 4-19    Allocation bitmap (16 sectors)
+ *   Sectors 20+     File data
  */
 export function createFloppyDisk(): Uint8Array[] {
   const sectors: Uint8Array[] = [];
@@ -162,23 +233,19 @@ export function createFloppyDisk(): Uint8Array[] {
   const cdResult = assemble(CD_ASM);
   const mkdirResult = assemble(MKDIR_ASM);
 
-  // Calculate how many sectors shell needs
-  // Boot sector has 504 bytes of code (512 - 8 byte header)
-  const shellInBootSector = Math.min(504, shellResult.bytes.length);
-  const shellRemaining = shellResult.bytes.length - shellInBootSector;
-  const shellContSectors = Math.ceil(shellRemaining / DISK.SECTOR_SIZE);
+  // Standard WireFS layout constants
+  const DIR_START = WIREFS.DIR_START;      // 1
+  const DIR_SECTORS = WIREFS.DIR_SECTORS;  // 3
+  const BITMAP_START = WIREFS.BITMAP_START; // 4
+  const BITMAP_SECTORS = WIREFS.BITMAP_SECTORS; // 16
+  const DATA_START = WIREFS.DATA_START;    // 20
 
-  // Layout:
-  // Sector 0: Boot
-  // Sectors 1 to shellContSectors: Shell continuation
-  // After that: Directory (3), Bitmap (16), Data
-  const dirStart = 1 + shellContSectors;
-  const bitmapStart = dirStart + WIREFS.DIR_SECTORS;
-  const dataStart = bitmapStart + WIREFS.BITMAP_SECTORS;
-
-  // Files other than shell (shell is embedded in boot sectors)
+  // Index 8 will be SRC directory (after the first 8 files 0-7)
+  const SRC_DIR_INDEX = 8;
   const files: FileEntry[] = [
-    { name: 'SHELL', ext: 'COM', data: shellResult.bytes, startSector: dataStart },
+    // Root files (indices 0-7)
+    // SHELL.COM must be first so boot loader can find it easily
+    { name: 'SHELL', ext: 'COM', data: shellResult.bytes },
     { name: 'ASM0', ext: 'COM', data: asm0Result.bytes },
     { name: 'EDIT', ext: 'COM', data: editResult.bytes },
     { name: 'CD', ext: 'COM', data: cdResult.bytes },
@@ -186,40 +253,45 @@ export function createFloppyDisk(): Uint8Array[] {
     { name: 'HELLO', ext: 'ASM', data: textToBytes(HELLO_ASM) },
     { name: 'TEST', ext: 'ASM', data: textToBytes(TEST_ASM) },
     { name: 'BEEP', ext: 'ASM', data: textToBytes(BEEP_ASM) },
+    // SRC directory (index 8)
+    { name: 'SRC', ext: '', data: new Uint8Array(0), isDirectory: true },
+    // Files in SRC/ (indices 9+)
+    { name: 'SHELL', ext: 'ASM', data: textToBytes(SHELL_ASM), parentIndex: SRC_DIR_INDEX },
+    { name: 'ASM', ext: 'ASM', data: textToBytes(ASM_ASM), parentIndex: SRC_DIR_INDEX },
+    { name: 'ASM0', ext: 'ASM', data: textToBytes(ASM0_ASM), parentIndex: SRC_DIR_INDEX },
+    { name: 'EDIT', ext: 'ASM', data: textToBytes(EDIT_ASM), parentIndex: SRC_DIR_INDEX },
+    { name: 'BOOTLOAD', ext: 'ASM', data: textToBytes(BOOTLOAD_ASM), parentIndex: SRC_DIR_INDEX },
+    { name: 'HEXLOAD', ext: 'ASM', data: textToBytes(HEXLOAD_ASM), parentIndex: SRC_DIR_INDEX },
+    { name: 'CD', ext: 'ASM', data: textToBytes(CD_ASM), parentIndex: SRC_DIR_INDEX },
+    { name: 'MKDIR', ext: 'ASM', data: textToBytes(MKDIR_ASM), parentIndex: SRC_DIR_INDEX },
+    { name: 'HELLO', ext: 'ASM', data: textToBytes(HELLO_ASM), parentIndex: SRC_DIR_INDEX },
   ];
 
   // Calculate sector assignments for files in data area
-  // Note: SHELL.COM is also in data area for DIR command to find it
-  let nextDataSector = dataStart;
+  // Directories don't need sectors allocated
+  let nextDataSector = DATA_START;
   for (const file of files) {
+    if (file.isDirectory) {
+      file.startSector = 0;  // Directories don't have data
+      continue;
+    }
     file.startSector = nextDataSector;
-    const sectorsNeeded = Math.ceil(file.data.length / DISK.SECTOR_SIZE);
+    const sectorsNeeded = Math.ceil(file.data.length / DISK.SECTOR_SIZE) || 1;
     nextDataSector += sectorsNeeded;
   }
 
-  // Sector 0: Boot sector with shell code
-  const bootSector = createBootSector(shellResult.bytes, SHELL_ENTRY, SHELL_ENTRY);
-  sectors[0] = bootSector;
+  // Get SHELL.COM location for boot sector
+  const shellFile = files[0];
+  const shellStartSector = shellFile.startSector!;
+  const shellSectorCount = Math.ceil(shellFile.data.length / DISK.SECTOR_SIZE);
 
-  // Sectors 1-N: Shell continuation (code that didn't fit in boot sector)
-  if (shellRemaining > 0) {
-    for (let s = 0; s < shellContSectors; s++) {
-      const sectorData = new Uint8Array(DISK.SECTOR_SIZE);
-      const srcOffset = shellInBootSector + s * DISK.SECTOR_SIZE;
-      const copyLen = Math.min(DISK.SECTOR_SIZE, shellResult.bytes.length - srcOffset);
+  // Sector 0: Boot sector with shell location info
+  sectors[0] = createFilesystemBootSector(shellStartSector, shellSectorCount);
 
-      for (let i = 0; i < copyLen; i++) {
-        sectorData[i] = shellResult.bytes[srcOffset + i];
-      }
-
-      sectors[1 + s] = sectorData;
-    }
-  }
-
-  // Directory sectors
+  // Directory sectors (1-3)
   const entriesPerSector = DISK.SECTOR_SIZE / ENTRY_SIZE; // 16
 
-  for (let dirSector = 0; dirSector < WIREFS.DIR_SECTORS; dirSector++) {
+  for (let dirSector = 0; dirSector < DIR_SECTORS; dirSector++) {
     const sectorData = new Uint8Array(DISK.SECTOR_SIZE);
 
     for (let entryIndex = 0; entryIndex < entriesPerSector; entryIndex++) {
@@ -242,40 +314,40 @@ export function createFloppyDisk(): Uint8Array[] {
       }
     }
 
-    sectors[dirStart + dirSector] = sectorData;
+    sectors[DIR_START + dirSector] = sectorData;
   }
 
   // Track all used sectors for bitmap
   const usedSectors: number[] = [];
-  // Boot + shell continuation
-  for (let s = 0; s <= shellContSectors; s++) {
-    usedSectors.push(s);
-  }
+  // Boot sector
+  usedSectors.push(0);
   // Directory
-  for (let s = 0; s < WIREFS.DIR_SECTORS; s++) {
-    usedSectors.push(dirStart + s);
+  for (let s = 0; s < DIR_SECTORS; s++) {
+    usedSectors.push(DIR_START + s);
   }
   // Bitmap
-  for (let s = 0; s < WIREFS.BITMAP_SECTORS; s++) {
-    usedSectors.push(bitmapStart + s);
+  for (let s = 0; s < BITMAP_SECTORS; s++) {
+    usedSectors.push(BITMAP_START + s);
   }
-  // File data
+  // File data (skip directories)
   for (const file of files) {
-    const sectorsNeeded = Math.ceil(file.data.length / DISK.SECTOR_SIZE);
+    if (file.isDirectory) continue;
+    const sectorsNeeded = Math.ceil(file.data.length / DISK.SECTOR_SIZE) || 1;
     for (let s = 0; s < sectorsNeeded; s++) {
       usedSectors.push(file.startSector! + s);
     }
   }
 
-  // Create bitmap
+  // Create bitmap sectors (4-19)
   const bitmapSectors = createBitmap(usedSectors);
-  for (let i = 0; i < WIREFS.BITMAP_SECTORS; i++) {
-    sectors[bitmapStart + i] = bitmapSectors[i];
+  for (let i = 0; i < BITMAP_SECTORS; i++) {
+    sectors[BITMAP_START + i] = bitmapSectors[i];
   }
 
-  // File data sectors
+  // File data sectors (20+)
   for (const file of files) {
-    const sectorsNeeded = Math.ceil(file.data.length / DISK.SECTOR_SIZE);
+    if (file.isDirectory) continue;
+    const sectorsNeeded = Math.ceil(file.data.length / DISK.SECTOR_SIZE) || 1;
 
     for (let s = 0; s < sectorsNeeded; s++) {
       const sectorData = new Uint8Array(DISK.SECTOR_SIZE);
@@ -291,7 +363,8 @@ export function createFloppyDisk(): Uint8Array[] {
   }
 
   // Fill any gaps with empty sectors
-  for (let i = 0; i < sectors.length; i++) {
+  const maxSector = Math.max(...usedSectors) + 1;
+  for (let i = 0; i < maxSector; i++) {
     if (!sectors[i]) {
       sectors[i] = new Uint8Array(DISK.SECTOR_SIZE);
     }
@@ -312,11 +385,18 @@ export function getFloppyInfo(): string {
   const asm0Sectors = Math.ceil(asm0Result.bytes.length / DISK.SECTOR_SIZE);
   const editSectors = Math.ceil(editResult.bytes.length / DISK.SECTOR_SIZE);
 
-  return `WireOS Installation Floppy
+  return `WireOS Installation Floppy (Standard WireFS Layout)
 ========================
-SHELL.COM  ${shellResult.bytes.length} bytes (${shellSectors} sectors)
-ASM0.COM   ${asm0Result.bytes.length} bytes (${asm0Sectors} sectors)
-EDIT.COM   ${editResult.bytes.length} bytes (${editSectors} sectors)
+Layout:
+  Sector 0:     Boot sector
+  Sectors 1-3:  Directory
+  Sectors 4-19: Bitmap
+  Sectors 20+:  File data
+
+Files:
+  SHELL.COM  ${shellResult.bytes.length} bytes (${shellSectors} sectors)
+  ASM0.COM   ${asm0Result.bytes.length} bytes (${asm0Sectors} sectors)
+  EDIT.COM   ${editResult.bytes.length} bytes (${editSectors} sectors)
 ------------------------
 Total: ${shellResult.bytes.length + asm0Result.bytes.length + editResult.bytes.length} bytes`;
 }

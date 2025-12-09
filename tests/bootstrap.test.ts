@@ -598,11 +598,13 @@ describe('Shell Direct Load Test', () => {
     computer.runUntilOutput('/>', 100000);
     computer.clearOutput();
 
-    // Test HELP - wait for MEM (last command in help output)
+    // Test HELP - wait for prompt to return, then check output
     computer.sendLine('HELP');
-    computer.runUntilOutput('MEM', 100000);
-    expect(computer.output).toContain('HELP');
-    expect(computer.output).toContain('VER');
+    computer.runUntilOutput('/>', 200000);
+
+    expect(computer.output).toContain('Commands:');
+    expect(computer.output).toContain('DIR');
+    expect(computer.output).toContain('INSTALL');
   });
 
   it('should respond to VER command when directly loaded', () => {
@@ -715,7 +717,7 @@ describe('Shell Bootstrap via Hex Loader', () => {
     const { bytes, origin } = assembleShell();
     expect(origin).toBe(0x0800);
     expect(bytes.length).toBeGreaterThan(100);
-    expect(bytes.length).toBeLessThan(1500); // Shell includes INSTALL command
+    expect(bytes.length).toBeLessThan(2500); // Shell includes TYPE, DEL, CD, RUN, INSTALL commands
     console.log(`Shell size: ${bytes.length} bytes`);
   });
 

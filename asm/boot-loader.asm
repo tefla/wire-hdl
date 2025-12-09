@@ -3,6 +3,13 @@
 ; ============================================================
 ; Reads boot sector from HDD first, then tries floppy if no boot
 ; Uses BIOS routines for console output
+;
+; Boot Sector Format (WireFS):
+;   $00-$01  Magic "WF"
+;   $02-$03  Entry point (little-endian) - where to jump
+;   $04-$05  Load address (little-endian) - where to load shell
+;   $06      Shell start sector (in data area)
+;   $07      Shell sector count
 ; ============================================================
 
 .ORG $FC00
@@ -10,8 +17,9 @@
 ; Zero page usage:
 ;   $E0-$E1  Entry point
 ;   $E2-$E3  Load address
-;   $E4-$E5  Sector count
-;   $E6-$E7  Source pointer
+;   $E4      Shell start sector
+;   $E5      Shell sector count
+;   $E6-$E7  Current load pointer
 ;   $E8      Boot device (0=HDD, 1=Floppy)
 ;
 ; I/O Addresses - HDD:
@@ -160,10 +168,10 @@ BOOT_VALID:
     LDA $4805           ; DISK_BUFFER[5] - Load high
     STA $E3
 
-    ; Get sector count
-    LDA $4806           ; DISK_BUFFER[6] - Count low
+    ; Get shell location from boot sector
+    LDA $4806           ; Shell start sector
     STA $E4
-    LDA $4807           ; DISK_BUFFER[7] - Count high
+    LDA $4807           ; Shell sector count
     STA $E5
 
     ; Print "OK"
@@ -173,106 +181,62 @@ BOOT_VALID:
     JSR $F000
     JSR $F080
 
-    ; If more than 1 sector, load additional sectors
-    LDA $E5             ; Check high byte
-    BNE LOAD_MORE
-    LDA $E4             ; Check if > 1
-    CMP #$02
-    BCC COPY_BOOT       ; <= 1 sector, just copy boot sector
+    ; Set up load pointer (start at load address)
+    LDA $E2
+    STA $E6             ; Current load pointer low
+    LDA $E3
+    STA $E7             ; Current load pointer high
 
-LOAD_MORE:
-    ; Load remaining sectors (sector 1 onwards)
     ; Check which drive we're booting from
     LDA $E8             ; Boot device
-    BNE LOAD_FROM_FLOPPY
+    BNE LOAD_SHELL_FLOPPY
 
-    ; Load from HDD
-    LDA #$01
+    ; Load SHELL.COM from HDD
+LOAD_SHELL_HDD:
+    LDA $E4             ; Shell start sector
     STA $8022           ; DISK_SEC_LO
     LDA #$00
     STA $8023           ; DISK_SEC_HI
-    ; Set buffer to load_address + 504 ($1F8)
-    ; Boot sector has 504 bytes of code, continuation starts there
-    LDA $E2
-    CLC
-    ADC #$F8            ; Add $F8 (low byte of 504)
+    LDA $E6             ; Load pointer low
     STA $8024           ; DISK_BUF_LO
-    LDA $E3
-    ADC #$01            ; Add $01 (high byte of 504) + carry
+    LDA $E7             ; Load pointer high
     STA $8025           ; DISK_BUF_HI
-    SEC
-    LDA $E4
-    SBC #$01            ; Subtract 1 for boot sector
+    LDA $E5             ; Shell sector count
     STA $8026           ; DISK_COUNT
-    BEQ COPY_BOOT
     LDA #$01            ; READ command
     STA $8021           ; DISK_CMD
-WAIT_DISK2:
+WAIT_SHELL_HDD:
     LDA $8020           ; DISK_STATUS
     AND #$02
-    BNE WAIT_DISK2
+    BNE WAIT_SHELL_HDD
     LDA $8020           ; DISK_STATUS
     AND #$80
     BNE DISK_ERROR
-    JMP COPY_BOOT
+    JMP BOOT_GO
 
-LOAD_FROM_FLOPPY:
-    ; Load from floppy
-    LDA #$01
+LOAD_SHELL_FLOPPY:
+    ; Load SHELL.COM from floppy
+    LDA $E4             ; Shell start sector
     STA $8042           ; FLOPPY_SEC_LO
     LDA #$00
     STA $8043           ; FLOPPY_SEC_HI
-    ; Set buffer to load_address + 504 ($1F8)
-    ; Boot sector has 504 bytes of code, continuation starts there
-    LDA $E2
-    CLC
-    ADC #$F8            ; Add $F8 (low byte of 504)
+    LDA $E6             ; Load pointer low
     STA $8044           ; FLOPPY_BUF_LO
-    LDA $E3
-    ADC #$01            ; Add $01 (high byte of 504) + carry
+    LDA $E7             ; Load pointer high
     STA $8045           ; FLOPPY_BUF_HI
-    SEC
-    LDA $E4
-    SBC #$01            ; Subtract 1 for boot sector
+    LDA $E5             ; Shell sector count
     STA $8046           ; FLOPPY_COUNT
-    BEQ COPY_BOOT
     LDA #$01            ; READ command
     STA $8041           ; FLOPPY_CMD
-WAIT_FLOPPY2:
+WAIT_SHELL_FLOPPY:
     LDA $8040           ; FLOPPY_STATUS
     AND #$02
-    BNE WAIT_FLOPPY2
+    BNE WAIT_SHELL_FLOPPY
     LDA $8040           ; FLOPPY_STATUS
     AND #$80
     BNE DISK_ERROR
 
-COPY_BOOT:
-    ; Copy boot sector data (starting at offset 8) to load address
-    ; This is the first 504 bytes of code/data
-    ; Use $E6/$E7 as source pointer
-    LDA #$08            ; $4808 = DISK_BUFFER + 8
-    STA $E6
-    LDA #$48
-    STA $E7
-
-    LDY #$00
-COPY_LOOP:
-    LDA ($E6),Y         ; Load from source
-    STA ($E2),Y         ; Store at load address
-    INY
-    BNE COPY_LOOP       ; Copy 256 bytes
-
-    ; Increment high bytes for second 256 bytes
-    INC $E3             ; Increment dest high byte
-    INC $E7             ; Increment src high byte
-COPY_LOOP2:
-    LDA ($E6),Y         ; Continue copy
-    STA ($E2),Y
-    INY
-    CPY #$F8            ; 504 - 256 = 248 bytes
-    BNE COPY_LOOP2
-    DEC $E3             ; Restore load address high byte
-
+BOOT_GO:
     ; Print "GO" and jump to entry point
     LDA #$47            ; 'G'
     JSR $F000

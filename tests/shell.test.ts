@@ -58,6 +58,10 @@ function createDirEntry({ name, ext, start, size }: DirEntry): Uint8Array {
   entry[0x12] = sectors & 0xff;
   entry[0x13] = (sectors >> 8) & 0xff;
 
+  // Parent index ($FFFF = root)
+  entry[0x15] = 0xff;
+  entry[0x16] = 0xff;
+
   return entry;
 }
 
@@ -181,6 +185,11 @@ function createShellMachine(commands: string[], diskSectors: Record<number, Uint
   memory[ZP_OUT_LO] = OUTPUT_BASE & 0xff;
   memory[ZP_OUT_HI] = (OUTPUT_BASE >> 8) & 0xff;
 
+  // Initialize current directory to root ($FFFF)
+  // Shell does this in INIT_ENV, but pre-set it to ensure root filtering works
+  memory[0x0240] = 0xff;  // CUR_DIR_LO
+  memory[0x0241] = 0xff;  // CUR_DIR_HI
+
   // Install disk sectors at DISK_BASE + sector*512
   for (const [sectorStr, data] of Object.entries(diskSectors)) {
     const sector = parseInt(sectorStr, 10);
@@ -225,7 +234,7 @@ describe('Shell commands on an emulated HDD', () => {
     ]);
 
     const { cpu, readOutput } = createShellMachine(['DIR'], {
-      2: dirSector,
+      1: dirSector,
     });
 
     const output = runUntil('ASM0.COM', cpu, readOutput);
@@ -247,12 +256,237 @@ describe('Shell commands on an emulated HDD', () => {
     ]);
 
     const { cpu, readOutput } = createShellMachine(['HELLO'], {
-      2: dirSector,
+      1: dirSector,
       4: program,
     });
 
     const output = runUntil('X', cpu, readOutput);
     expect(output).toContain('HELLO'); // Command echoed
     expect(output).toContain('X'); // Program output
+  });
+
+  it('shows version with VER command', () => {
+    const { cpu, readOutput } = createShellMachine(['VER'], {});
+    const output = runUntil('WireOS', cpu, readOutput);
+    expect(output).toContain('WireOS');
+    expect(output).toContain('v1');
+  });
+
+  it('shows prompt after unknown command', () => {
+    const { cpu, readOutput } = createShellMachine(['BADCMD'], {});
+    // Wait for prompt to appear after the command is processed
+    const output = runUntil('/>', cpu, readOutput, 200000);
+    // The command is echoed
+    expect(output).toContain('BAD'); // Partial match is fine
+  });
+
+  it('handles empty command (just Enter)', () => {
+    const { cpu, readOutput } = createShellMachine([''], {});
+    const output = runUntil('/>', cpu, readOutput, 100000);
+    // Should show prompt without error
+    expect(output).toContain('/>');
+  });
+
+  it('handles multiple commands in sequence', () => {
+    const dirSector = buildDirectorySector([
+      { name: 'TEST', ext: 'COM', start: 4, size: 10 },
+    ]);
+
+    const { cpu, readOutput } = createShellMachine(['VER', 'DIR'], {
+      1: dirSector,
+    });
+
+    const output = runUntil('TEST.COM', cpu, readOutput, 200000);
+    expect(output).toContain('WireOS'); // From VER
+    expect(output).toContain('TEST.COM'); // From DIR
+  });
+
+  it('lists directory with multiple file extensions', () => {
+    const dirSector = buildDirectorySector([
+      { name: 'HELLO', ext: 'ASM', start: 4, size: 100 },
+      { name: 'HELLO', ext: 'COM', start: 5, size: 50 },
+      { name: 'README', ext: 'TXT', start: 6, size: 200 },
+    ]);
+
+    const { cpu, readOutput } = createShellMachine(['DIR'], {
+      1: dirSector,
+    });
+
+    const output = runUntil('README.TXT', cpu, readOutput);
+    expect(output).toContain('HELLO.ASM');
+    expect(output).toContain('HELLO.COM');
+    expect(output).toContain('README.TXT');
+  });
+});
+
+describe('Shell command parsing', () => {
+  it('case-insensitive command matching for DIR', () => {
+    const dirSector = buildDirectorySector([
+      { name: 'FILE', ext: 'TXT', start: 4, size: 10 },
+    ]);
+
+    // Shell converts input to uppercase internally
+    const { cpu, readOutput } = createShellMachine(['dir'], {
+      1: dirSector,
+    });
+
+    const output = runUntil('FILE.TXT', cpu, readOutput);
+    expect(output).toContain('FILE.TXT');
+  });
+
+  it('case-insensitive command matching for VER', () => {
+    const { cpu, readOutput } = createShellMachine(['ver'], {});
+    const output = runUntil('WireOS', cpu, readOutput);
+    expect(output).toContain('WireOS');
+  });
+});
+
+describe('Shell file execution', () => {
+  it('runs program that returns to shell prompt', () => {
+    const dirSector = buildDirectorySector([
+      { name: 'QUICK', ext: 'COM', start: 4, size: 8 },
+    ]);
+
+    // Program that just returns (RTS)
+    const program = new Uint8Array(512);
+    program.set([
+      0xa9, 0x21, // LDA #'!'
+      0x20, 0x00, 0xf0, // JSR PUTCHAR
+      0x60, // RTS (return to shell)
+    ]);
+
+    const { cpu, readOutput } = createShellMachine(['QUICK'], {
+      1: dirSector,
+      4: program,
+    });
+
+    const output = runUntil('!', cpu, readOutput);
+    expect(output).toContain('!');
+  });
+
+  it('handles program with multiple prints', () => {
+    const dirSector = buildDirectorySector([
+      { name: 'MULTI', ext: 'COM', start: 4, size: 20 },
+    ]);
+
+    // Program that prints "AB"
+    const program = new Uint8Array(512);
+    program.set([
+      0xa9, 0x41, // LDA #'A'
+      0x20, 0x00, 0xf0, // JSR PUTCHAR
+      0xa9, 0x42, // LDA #'B'
+      0x20, 0x00, 0xf0, // JSR PUTCHAR
+      0x02, // HLT
+    ]);
+
+    const { cpu, readOutput } = createShellMachine(['MULTI'], {
+      1: dirSector,
+      4: program,
+    });
+
+    const output = runUntil('B', cpu, readOutput);
+    expect(output).toContain('AB');
+  });
+
+  it('file not found returns to prompt', () => {
+    const dirSector = buildDirectorySector([
+      { name: 'REAL', ext: 'COM', start: 4, size: 10 },
+    ]);
+
+    const { cpu, readOutput } = createShellMachine(['FAKE'], {
+      1: dirSector,
+    });
+
+    // Should return to prompt even if file not found
+    const output = runUntil('/>', cpu, readOutput, 200000);
+    // Command is echoed (at least partial match)
+    expect(output).toContain('FAK');
+  });
+});
+
+describe('Shell prompt and display', () => {
+  it('shows initial prompt on boot', () => {
+    const { cpu, readOutput } = createShellMachine([], {});
+    const output = runUntil('/>', cpu, readOutput, 50000);
+    expect(output).toContain('/>');
+  });
+
+  it('echoes typed characters', () => {
+    const { cpu, readOutput } = createShellMachine(['DIR'], {});
+    const output = runUntil('/>', cpu, readOutput, 100000);
+    expect(output).toContain('DIR');
+  });
+});
+
+describe('Shell TYPE command', () => {
+  it('displays complete file contents', () => {
+    // Create a test file with content longer than 256 bytes
+    const fileContent = '; HELLO.ASM - Hello World\n' +
+      '; This is a test file\n' +
+      '; ' + 'x'.repeat(300) + '\n' +  // Long line to exceed 256 bytes total
+      '.ORG $0800\n' +
+      'START:\n' +
+      '    RTS\n';
+
+    const fileSector = new Uint8Array(512);
+    for (let i = 0; i < fileContent.length; i++) {
+      fileSector[i] = fileContent.charCodeAt(i);
+    }
+
+    const dirSector = buildDirectorySector([
+      { name: 'HELLO', ext: 'ASM', start: 20, size: fileContent.length },
+    ]);
+
+    const { cpu, readOutput } = createShellMachine(['TYPE HELLO'], {
+      1: dirSector,
+      20: fileSector,
+    });
+
+    const output = runUntil('RTS', cpu, readOutput, 500000);
+
+    // Check that we see content from beginning, middle, and end
+    expect(output).toContain('HELLO.ASM');
+    expect(output).toContain('This is a test file');
+    expect(output).toContain('xxx'); // Middle of long line
+    expect(output).toContain('.ORG $0800');
+    expect(output).toContain('START:');
+    expect(output).toContain('RTS');
+  });
+
+  it('displays file with exactly 256 bytes', () => {
+    const fileContent = 'A'.repeat(256);
+    const fileSector = new Uint8Array(512);
+    for (let i = 0; i < 256; i++) {
+      fileSector[i] = fileContent.charCodeAt(i);
+    }
+
+    const dirSector = buildDirectorySector([
+      { name: 'TEST256', ext: 'TXT', start: 20, size: 256 },
+    ]);
+
+    const { cpu, readOutput } = createShellMachine(['TYPE TEST256'], {
+      1: dirSector,
+      20: fileSector,
+    });
+
+    // Run enough cycles to process 256 characters
+    // runUntil checks every 256 iterations, so we need to run until we see all 256 A's
+    // After TYPE finishes, we get /> prompt
+    let output = '';
+    for (let i = 0; i < 500000 && !cpu.halted; i++) {
+      cpu.step();
+      if ((i & 0xfff) === 0) {
+        output = readOutput();
+        // Check if TYPE is done (prompt appears after the A's)
+        if (output.includes('/>') && output.indexOf('/>') > output.indexOf('TEST256')) {
+          break;
+        }
+      }
+    }
+    output = readOutput();
+
+    // Count how many 'A's we got - should be all 256
+    const aCount = (output.match(/A/g) || []).length;
+    expect(aCount).toBeGreaterThanOrEqual(256);
   });
 });

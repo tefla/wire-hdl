@@ -1714,6 +1714,8 @@ MNEM_TABLE:
         .DB 0, 0, 0, 0        ; End marker
 
 ; Pointers to opcode tables for each mnemonic
+; OPCODE_TABLE alias for legacy code (dead code in LOOKUP_OPCODE)
+OPCODE_TABLE:
 MNEM_MODES:
         .DW OP_ADC, OP_AND, OP_ASL, OP_BCC, OP_BCS, OP_BEQ, OP_BIT, OP_BMI
         .DW OP_BNE, OP_BPL, OP_BRK, OP_BVC, OP_BVS, OP_CLC, OP_CLD, OP_CLI

@@ -78,6 +78,14 @@ export const OPCODES = {
   'STA': 0x8D,
   'STX': 0x8E,
   'STY': 0x8C,
+  'ADC_ABS': 0x6D,
+  'SBC_ABS': 0xED,
+  'CMP_ABS': 0xCD,
+  'CPX_ABS': 0xEC,
+  'CPY_ABS': 0xCC,
+  'AND_ABS': 0x2D,
+  'ORA_ABS': 0x0D,
+  'EOR_ABS': 0x4D,
   'JMP': 0x4C,
   'JSR': 0x20,
   'INC_ABS': 0xEE,
@@ -172,7 +180,7 @@ export const OPCODES = {
 } as const;
 
 // Token types
-type TokenType = 'LABEL' | 'MNEMONIC' | 'NUMBER' | 'COMMA' | 'HASH' | 'DOLLAR' | 'LPAREN' | 'RPAREN' | 'EQUALS' | 'DOT' | 'PLUS' | 'MINUS' | 'NEWLINE' | 'EOF';
+type TokenType = 'LABEL' | 'MNEMONIC' | 'NUMBER' | 'COMMA' | 'HASH' | 'DOLLAR' | 'LPAREN' | 'RPAREN' | 'EQUALS' | 'DOT' | 'PLUS' | 'MINUS' | 'LESS' | 'GREATER' | 'NEWLINE' | 'EOF';
 
 interface Token {
   type: TokenType;
@@ -202,6 +210,8 @@ interface Instruction {
   operand?: number;
   label?: string;
   offset?: number; // For label+offset expressions
+  lowByte?: boolean;  // Extract low byte of address (<label)
+  highByte?: boolean; // Extract high byte of address (>label)
 }
 
 export interface AssemblerOutput {
@@ -296,6 +306,20 @@ function tokenize(source: string): Token[] {
     // Minus (for arithmetic)
     if (ch === '-') {
       tokens.push({ type: 'MINUS', value: '-', line });
+      i++;
+      continue;
+    }
+
+    // Less than (low byte operator)
+    if (ch === '<') {
+      tokens.push({ type: 'LESS', value: '<', line });
+      i++;
+      continue;
+    }
+
+    // Greater than (high byte operator)
+    if (ch === '>') {
+      tokens.push({ type: 'GREATER', value: '>', line });
       i++;
       continue;
     }
@@ -438,7 +462,29 @@ function parse(tokens: Token[]): { instructions: Instruction[]; labels: Map<stri
   }
 
   // Parse a primary value (number or label reference)
-  function parsePrimary(): { value: number; label?: string } {
+  function parsePrimary(): { value: number; label?: string; lowByte?: boolean; highByte?: boolean } {
+    // Handle low byte operator <
+    if (peek().type === 'LESS') {
+      advance(); // skip <
+      const inner = parsePrimary();
+      const resolved = inner.label ? labels.get(inner.label) : inner.value;
+      if (resolved !== undefined) {
+        return { value: resolved & 0xff };
+      }
+      // Forward reference - mark for low byte extraction
+      return { value: 0, label: inner.label, lowByte: true };
+    }
+    // Handle high byte operator >
+    if (peek().type === 'GREATER') {
+      advance(); // skip >
+      const inner = parsePrimary();
+      const resolved = inner.label ? labels.get(inner.label) : inner.value;
+      if (resolved !== undefined) {
+        return { value: (resolved >> 8) & 0xff };
+      }
+      // Forward reference - mark for high byte extraction
+      return { value: 0, label: inner.label, highByte: true };
+    }
     if (peek().type === 'DOLLAR') {
       advance(); // skip $
       return { value: parseInt(advance().value, 16) };
@@ -460,7 +506,7 @@ function parse(tokens: Token[]): { instructions: Instruction[]; labels: Map<stri
   }
 
   // Parse an expression: value +/- value
-  function parseExpression(): { value: number; label?: string; offset: number } {
+  function parseExpression(): { value: number; label?: string; offset: number; lowByte?: boolean; highByte?: boolean } {
     const primary = parsePrimary();
     let offset = 0;
 
@@ -475,7 +521,7 @@ function parse(tokens: Token[]): { instructions: Instruction[]; labels: Map<stri
       }
     }
 
-    return { value: primary.value + offset, label: primary.label, offset };
+    return { value: primary.value + offset, label: primary.label, offset, lowByte: primary.lowByte, highByte: primary.highByte };
   }
 
   function parseNumber(): number {
@@ -587,11 +633,19 @@ function parse(tokens: Token[]): { instructions: Instruction[]; labels: Map<stri
         // Fall through to check other modes (zero page, absolute)
       }
 
-      // Immediate mode: LDA #$xx
+      // Immediate mode: LDA #$xx or LDA #<label or LDA #>label
       if (peek().type === 'HASH') {
         advance(); // skip #
-        const operand = parseNumber();
-        instructions.push({ mnemonic, mode: 'immediate', operand });
+        const expr = parseExpression();
+        instructions.push({
+          mnemonic,
+          mode: 'immediate',
+          operand: expr.value,
+          label: expr.label,
+          offset: expr.offset,
+          lowByte: expr.lowByte,
+          highByte: expr.highByte
+        });
         pc += 2;
         continue;
       }
@@ -739,7 +793,7 @@ function generate(instructions: Instruction[], labels: Map<string, number>, orig
   let pc = origin;
 
   for (const inst of instructions) {
-    const { mnemonic, mode, operand, label, offset } = inst;
+    const { mnemonic, mode, operand, label, offset, lowByte, highByte } = inst;
 
     // Resolve label to address (with optional offset)
     let addr = operand;
@@ -748,7 +802,15 @@ function generate(instructions: Instruction[], labels: Map<string, number>, orig
       if (labelAddr === undefined) {
         throw new Error(`Undefined label: ${label}`);
       }
-      addr = labelAddr + (offset || 0);
+      let fullAddr = labelAddr + (offset || 0);
+      // Apply low/high byte extraction if specified
+      if (lowByte) {
+        addr = fullAddr & 0xff;
+      } else if (highByte) {
+        addr = (fullAddr >> 8) & 0xff;
+      } else {
+        addr = fullAddr;
+      }
     }
 
     switch (mode) {
@@ -845,7 +907,7 @@ function generate(instructions: Instruction[], labels: Map<string, number>, orig
         const target = addr!;
         const offset = target - (pc + 2);
         if (offset < -128 || offset > 127) {
-          throw new Error(`Branch target out of range: ${offset}`);
+          throw new Error(`Branch target out of range: ${offset} (${mnemonic} at $${pc.toString(16).toUpperCase()} to ${label || '$' + target.toString(16).toUpperCase()})`);
         }
         bytes.push(op, offset & 0xFF);
         pc += 2;
