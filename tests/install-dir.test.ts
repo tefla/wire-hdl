@@ -231,11 +231,11 @@ describe('INSTALL and DIR integration', () => {
     computer.insertFloppy(floppySectors);
 
     // Load shell directly into memory
-    const { bytes } = assembleShell();
+    const { bytes, origin } = assembleShell();
     for (let i = 0; i < bytes.length; i++) {
-      computer.memory[0x0800 + i] = bytes[i];
+      computer.memory[origin + i] = bytes[i];
     }
-    computer.cpu.pc = 0x0800;
+    computer.cpu.pc = origin;
 
     // Run until we see the prompt
     const gotPrompt = computer.runUntilOutput('/>', 100000);
@@ -287,11 +287,11 @@ describe('INSTALL and DIR integration', () => {
     }
 
     // Load shell directly
-    const { bytes } = assembleShell();
+    const { bytes, origin } = assembleShell();
     for (let i = 0; i < bytes.length; i++) {
-      computer.memory[0x0800 + i] = bytes[i];
+      computer.memory[origin + i] = bytes[i];
     }
-    computer.cpu.pc = 0x0800;
+    computer.cpu.pc = origin;
 
     // Run until prompt
     computer.runUntilOutput('/>', 100000);
@@ -318,6 +318,68 @@ describe('INSTALL and DIR integration', () => {
       }
       expect(hddDir[0]).toBe(floppyDir[0]); // Status byte should match
     }
+  });
+
+  it.skip('should run ASM TEST.ASM', () => {
+    // TODO: Debug ASM.COM assembly loop - it loads file and starts but gets stuck
+    const computer = new TestComputer();
+
+    // Create and insert floppy disk
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell directly into memory
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until we see the prompt
+    const gotPrompt = computer.runUntilOutput('/>', 100000);
+    expect(gotPrompt).toBe(true);
+    computer.clearOutput();
+
+    // Run INSTALL first
+    computer.sendLine('INSTALL');
+    const installDone = computer.runUntilOutput('Done', 500000);
+    expect(installDone).toBe(true);
+    computer.clearOutput();
+
+    // Now try ASM TEST.ASM
+    computer.sendLine('ASM TEST.ASM');
+
+    // Run until we see ASM's banner "Assembler"
+    const sawBanner = computer.runUntilOutput('Assembler', 500000);
+    console.log('Output after ASM command:', computer.output);
+    console.log('PC after ASM command:', computer.cpu.pc.toString(16));
+
+    // Debug: dump memory at critical areas
+    console.log('Memory at $0200:', Array.from(computer.memory.slice(0x200, 0x210)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    console.log('Memory at $0300 (CMD_BUF):', Array.from(computer.memory.slice(0x300, 0x320)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    console.log('CMD_BUF as string:', String.fromCharCode(...computer.memory.slice(0x300, 0x320).filter(b => b >= 0x20 && b < 0x7f)));
+    console.log('Zero page $50-$5F:', Array.from(computer.memory.slice(0x50, 0x60)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    console.log('TMPPTR ($56-$57):', computer.memory[0x56].toString(16), computer.memory[0x57].toString(16));
+    console.log('FILESEC ($5C):', computer.memory[0x5c].toString(16));
+    console.log('FILESIZE ($5E-$5F):', computer.memory[0x5e].toString(16), computer.memory[0x5f].toString(16));
+    console.log('Memory at $0800 (ASM entry):', Array.from(computer.memory.slice(0x800, 0x820)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    console.log('Memory at $2000 (SRC_BUF):', Array.from(computer.memory.slice(0x2000, 0x2040)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    console.log('SRC_BUF as string:', String.fromCharCode(...computer.memory.slice(0x2000, 0x2100).filter(b => b >= 0x20 && b < 0x7f)).substring(0, 100));
+
+    expect(sawBanner).toBe(true);
+
+    // Run more to see what happens
+    computer.run(10000000);
+    console.log('Final output:', computer.output);
+    console.log('Final PC:', computer.cpu.pc.toString(16));
+
+    // Check if we get any error or success message
+    const hasError = computer.output.includes('Error');
+    const hasSuccess = computer.output.includes('bytes');
+    console.log('Has error:', hasError, 'Has success:', hasSuccess);
+
+    // We should see ASM loading the file
+    expect(computer.output).toContain('Loading');
   });
 
   it('should check floppy disk layout', () => {

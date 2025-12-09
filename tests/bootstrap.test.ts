@@ -569,14 +569,14 @@ describe('Shell Direct Load Test', () => {
   it('should run shell when directly loaded into memory', () => {
     const computer = new BootstrapComputer();
 
-    // Directly load shell into memory at $0800
-    const { bytes } = assembleShell();
+    // Directly load shell into memory
+    const { bytes, origin } = assembleShell();
     for (let i = 0; i < bytes.length; i++) {
-      computer.memory[0x0800 + i] = bytes[i];
+      computer.memory[origin + i] = bytes[i];
     }
 
     // Set PC to shell entry and run
-    computer.cpu.pc = 0x0800;
+    computer.cpu.pc = origin;
 
     // Run until we see prompt (which comes after banner)
     const found = computer.runUntilOutput('/>', 100000);
@@ -588,11 +588,11 @@ describe('Shell Direct Load Test', () => {
     const computer = new BootstrapComputer();
 
     // Load shell
-    const { bytes } = assembleShell();
+    const { bytes, origin } = assembleShell();
     for (let i = 0; i < bytes.length; i++) {
-      computer.memory[0x0800 + i] = bytes[i];
+      computer.memory[origin + i] = bytes[i];
     }
-    computer.cpu.pc = 0x0800;
+    computer.cpu.pc = origin;
 
     // Run until prompt
     computer.runUntilOutput('/>', 100000);
@@ -611,11 +611,11 @@ describe('Shell Direct Load Test', () => {
     const computer = new BootstrapComputer();
 
     // Load shell
-    const { bytes } = assembleShell();
+    const { bytes, origin } = assembleShell();
     for (let i = 0; i < bytes.length; i++) {
-      computer.memory[0x0800 + i] = bytes[i];
+      computer.memory[origin + i] = bytes[i];
     }
-    computer.cpu.pc = 0x0800;
+    computer.cpu.pc = origin;
 
     // Run until prompt
     computer.runUntilOutput('/>', 100000);
@@ -631,11 +631,11 @@ describe('Shell Direct Load Test', () => {
     const computer = new BootstrapComputer();
 
     // Load shell
-    const { bytes } = assembleShell();
+    const { bytes, origin } = assembleShell();
     for (let i = 0; i < bytes.length; i++) {
-      computer.memory[0x0800 + i] = bytes[i];
+      computer.memory[origin + i] = bytes[i];
     }
-    computer.cpu.pc = 0x0800;
+    computer.cpu.pc = origin;
 
     // Run until prompt
     computer.runUntilOutput('/>', 100000);
@@ -652,11 +652,11 @@ describe('Shell Direct Load Test', () => {
     const computer = new BootstrapComputer();
 
     // Load shell
-    const { bytes } = assembleShell();
+    const { bytes, origin } = assembleShell();
     for (let i = 0; i < bytes.length; i++) {
-      computer.memory[0x0800 + i] = bytes[i];
+      computer.memory[origin + i] = bytes[i];
     }
-    computer.cpu.pc = 0x0800;
+    computer.cpu.pc = origin;
 
     // Run until prompt
     computer.runUntilOutput('/>', 100000);
@@ -715,7 +715,7 @@ describe('Shell Bootstrap via Hex Loader', () => {
 
   it('should assemble shell correctly', () => {
     const { bytes, origin } = assembleShell();
-    expect(origin).toBe(0x0800);
+    expect(origin).toBe(0xC000);  // Shell now lives in ROM area to not conflict with loaded programs
     expect(bytes.length).toBeGreaterThan(100);
     expect(bytes.length).toBeLessThan(2500); // Shell includes TYPE, DEL, CD, RUN, INSTALL commands
     console.log(`Shell size: ${bytes.length} bytes`);
@@ -723,16 +723,18 @@ describe('Shell Bootstrap via Hex Loader', () => {
 
   it('should bootstrap shell via hex loader', () => {
     const computer = new BootstrapComputer();
+    const { origin } = assembleShell();
 
     // Boot to hex loader
     computer.runUntilOutput('>', 100000);
     console.log('After boot:', computer.output);
     computer.clearOutput();
 
-    // Set load address to $0800
-    computer.sendLine('L 0800');
+    // Set load address to shell's actual origin (now $C000)
+    const originStr = origin.toString(16).toUpperCase();
+    computer.sendLine(`L ${originStr}`);
     computer.run(50000);
-    console.log('After L 0800:', computer.output);
+    console.log(`After L ${originStr}:`, computer.output);
 
     // Get shell hex bytes
     const hexPairs = getShellHexPairs();
@@ -753,8 +755,8 @@ describe('Shell Bootstrap via Hex Loader', () => {
     const finalAddr = finalAddrLo | (finalAddrHi << 8);
     console.log('Final load address:', finalAddr.toString(16));
 
-    // Reset load address to start before executing
-    computer.sendLine('L 0800');
+    // Reset load address to shell's origin before executing
+    computer.sendLine(`L ${originStr}`);
     computer.run(50000);
 
     // Execute shell
@@ -772,8 +774,11 @@ describe('Shell Bootstrap via Hex Loader', () => {
 
   // Helper to bootstrap shell
   function bootstrapShell(computer: BootstrapComputer): void {
+    const { origin } = assembleShell();
+    const originStr = origin.toString(16).toUpperCase();
+
     computer.runUntilOutput('>', 100000);
-    computer.sendLine('L 0800');
+    computer.sendLine(`L ${originStr}`);
     computer.run(50000);
 
     const hexPairs = getShellHexPairs();
@@ -783,7 +788,7 @@ describe('Shell Bootstrap via Hex Loader', () => {
     }
 
     // Reset load address before executing
-    computer.sendLine('L 0800');
+    computer.sendLine(`L ${originStr}`);
     computer.run(50000);
 
     computer.sendLine('E');

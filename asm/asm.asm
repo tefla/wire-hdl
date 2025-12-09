@@ -73,8 +73,10 @@ DIR_BUF     = $0400         ; Directory sector buffer
 CMD_BUF     = $0300         ; Command line buffer (set by shell)
 
 ; Zero page
-SRCPTR      = $30
-OUTPTR      = $32
+; Note: $30-$33 are reserved for BIOS disk I/O parameters
+; SRCPTR and OUTPTR moved to avoid conflict
+SRCPTR      = $60
+OUTPTR      = $62
 CURPC       = $34
 SYMPTR      = $36
 PASS        = $38
@@ -95,6 +97,7 @@ TOKTYPE     = $59
 NUMVAL      = $5A
 FILESEC     = $5C          ; File start sector
 FILESIZE    = $5E          ; File size (16-bit)
+DIRSEC      = $64          ; Current directory sector being searched
 
 ; Token types
 TOK_EOF     = 0
@@ -1172,39 +1175,74 @@ GL_DONE:
 GET_TOKEN:
         LDY #0
         LDA (SRCPTR),Y
-        BEQ GT_EOF
+        BEQ GT_EOF_JMP
         CMP #$0A
-        BEQ GT_NL
+        BEQ GT_NL_JMP
         CMP #$0D
-        BEQ GT_NL
+        BEQ GT_NL_JMP
         CMP #'#'
-        BEQ GT_HASH
+        BEQ GT_HASH_JMP
         CMP #'('
-        BEQ GT_LPAREN
+        BEQ GT_LPAREN_JMP
         CMP #')'
-        BEQ GT_RPAREN
+        BEQ GT_RPAREN_JMP
         CMP #','
-        BEQ GT_COMMA
+        BEQ GT_COMMA_JMP
         CMP #'+'
-        BEQ GT_PLUS
+        BEQ GT_PLUS_JMP
         CMP #'-'
-        BEQ GT_MINUS
+        BEQ GT_MINUS_JMP
         CMP #'='
-        BEQ GT_EQUALS
+        BEQ GT_EQUALS_JMP
         CMP #'.'
-        BEQ GT_DOT
+        BEQ GT_DOT_JMP
         CMP #':'
-        BEQ GT_COLON
+        BEQ GT_COLON_JMP
         CMP #'<'
-        BEQ GT_LT
+        BEQ GT_LT_JMP
         CMP #'>'
-        BEQ GT_GT
+        BEQ GT_GT_JMP
+        CMP #';'
+        BEQ GT_COMMENT_JMP
         CMP #'$'
-        BEQ GT_NUMBER
+        BEQ GT_NUMBER_JMP
         CMP #'0'
         BCC GT_LABEL
         CMP #':'
-        BCC GT_NUMBER
+        BCC GT_NUMBER_JMP
+        JMP GT_LABEL        ; Fall through to label
+
+; Trampolines for far branches
+GT_EOF_JMP:
+        JMP GT_EOF
+GT_NL_JMP:
+        JMP GT_NL
+GT_HASH_JMP:
+        JMP GT_HASH
+GT_LPAREN_JMP:
+        JMP GT_LPAREN
+GT_RPAREN_JMP:
+        JMP GT_RPAREN
+GT_COMMA_JMP:
+        JMP GT_COMMA
+GT_PLUS_JMP:
+        JMP GT_PLUS
+GT_MINUS_JMP:
+        JMP GT_MINUS
+GT_EQUALS_JMP:
+        JMP GT_EQUALS
+GT_DOT_JMP:
+        JMP GT_DOT
+GT_COLON_JMP:
+        JMP GT_COLON
+GT_LT_JMP:
+        JMP GT_LT
+GT_GT_JMP:
+        JMP GT_GT
+GT_COMMENT_JMP:
+        JMP GT_COMMENT
+GT_NUMBER_JMP:
+        JMP GT_NUMBER
 
 GT_LABEL:
         ; Identifier - could be label or mnemonic
@@ -1229,6 +1267,20 @@ GT_NL:
         LDA #TOK_NEWLINE
         STA TOKTYPE
         INY
+        RTS
+GT_COMMENT:
+        ; Skip to end of line, then return NEWLINE token
+GT_COMMENT_SKIP:
+        INY
+        LDA (SRCPTR),Y
+        BEQ GT_COMMENT_DONE     ; End of file
+        CMP #$0A                ; LF
+        BEQ GT_COMMENT_DONE
+        CMP #$0D                ; CR
+        BNE GT_COMMENT_SKIP
+GT_COMMENT_DONE:
+        LDA #TOK_NEWLINE
+        STA TOKTYPE
         RTS
 GT_HASH:
         LDA #TOK_HASH
@@ -1889,13 +1941,13 @@ LF_GOT_ARG:
 
         ; Search directory for file
         LDA #DIR_START
-        STA TMPPTR+1        ; Current sector (reuse high byte)
+        STA DIRSEC          ; Current directory sector
         LDA #DIR_SECTS
         STA CHARTMP         ; Remaining sectors
 
 LF_SECTOR:
         ; Read directory sector into DIR_BUF
-        LDA TMPPTR+1        ; Sector number
+        LDA DIRSEC          ; Sector number
         STA $30
         LDA #0
         STA $31
@@ -1969,12 +2021,15 @@ LF_CMP_END:
         STA FILESIZE+1
 
         ; Print "Loading " + filename
+        ; Save TMPPTR (filename offset) before PRINT_STR clobbers it
+        LDA TMPPTR
+        PHA
         LDA #<MSG_LOADING
         LDX #>MSG_LOADING
         JSR PRINT_STR
-
-        ; Print filename from CMD_BUF
-        LDX TMPPTR
+        ; Restore filename offset
+        PLA
+        TAX
 LF_PRINT_NAME:
         LDA CMD_BUF,X
         BEQ LF_PRINT_DONE
@@ -2070,7 +2125,7 @@ LF_NEXT_ENTRY:
 
 LF_NEXT_SECTOR_CHECK:
         ; Next sector
-        INC TMPPTR+1        ; Next sector number
+        INC DIRSEC          ; Next sector number
         DEC CHARTMP         ; Remaining sectors
         BEQ LF_NOT_FOUND
         JMP LF_SECTOR

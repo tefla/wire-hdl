@@ -32,7 +32,7 @@
 ;   $30-$33: BIOS disk params (sector, buffer addr)
 ; ============================================================
 
-.ORG $0800
+.ORG $C000
 
 ; ============================================================
 ; Constants
@@ -193,12 +193,20 @@ PARSE_CMD:
     CMP #$44            ; 'D' (DIR or DEL)
     BEQ PC_D_CMD
     CMP #$48            ; 'H' (HELP or HEX)
-    BEQ PC_H_CMD
+    BEQ PC_H_JMP
     CMP #$49            ; 'I' (INSTALL)
-    BEQ PC_I_CMD
+    BEQ PC_I_JMP
     CMP #$4D            ; 'M' (MEM)
-    BEQ PC_M_CMD
+    BEQ PC_M_JMP
     JMP PC_MORE         ; Continue checking (trampoline)
+
+; Trampolines for far command handlers
+PC_H_JMP:
+    JMP PC_H_CMD
+PC_I_JMP:
+    JMP PC_I_CMD
+PC_M_JMP:
+    JMP PC_M_CMD
 
 PC_DONE:
     RTS
@@ -242,12 +250,24 @@ PC_TRY_RUN2:
     JMP CMD_RUN
 
 PC_I_CMD:
-    ; Check "INSTALL"
+    ; Check "INSTALL" (must match full command)
     LDA $0301
     CMP #$4E            ; 'N'
     BNE PC_TRY_RUN6
     LDA $0302
     CMP #$53            ; 'S'
+    BNE PC_TRY_RUN6
+    LDA $0303
+    CMP #$54            ; 'T'
+    BNE PC_TRY_RUN6
+    LDA $0304
+    CMP #$41            ; 'A'
+    BNE PC_TRY_RUN6
+    LDA $0305
+    CMP #$4C            ; 'L'
+    BNE PC_TRY_RUN6
+    LDA $0306
+    CMP #$4C            ; 'L'
     BNE PC_TRY_RUN6
     JMP CMD_INSTALL
 PC_TRY_RUN6:
@@ -1135,7 +1155,10 @@ RUN_SECTOR:
     LDA #$04
     STA $33
     JSR $F200           ; DISK_READ
-    BCS RUN_NEXT_SECTOR
+    BCC RUN_DIR_OK
+RUN_NEXT_SECTOR_JMP:
+    JMP RUN_NEXT_SECTOR ; Trampoline for far branch
+RUN_DIR_OK:
 
     ; Search directory for matching filename
     LDX #$00            ; Entry index
@@ -1149,14 +1172,17 @@ RUN_SEARCH:
     LDY #$00
     LDA ($34),Y
     CMP #$01
-    BNE RUN_NEXT_ENTRY
-
+    BEQ RUN_ENTRY_OK
+    JMP RUN_NEXT_ENTRY  ; Trampoline for inactive entry
+RUN_ENTRY_OK:
     ; Compare filename with command buffer
     ; Command is at $0300, filename at ($34)+1
     LDY #$00
 RUN_CMP_LOOP:
     LDA $0300,Y         ; Command char
     BEQ RUN_CMP_END     ; End of command?
+    CMP #$20            ; Space - end of name (args follow)
+    BEQ RUN_CMP_END
     CMP #$2E            ; '.' - skip extension in cmd
     BEQ RUN_CMP_END
 
@@ -1171,8 +1197,9 @@ RUN_CMP_LOOP:
 
     ; Compare
     CMP $0300,Y
-    BNE RUN_NEXT_ENTRY  ; No match
-
+    BEQ RUN_CMP_MATCH   ; Match continues
+    JMP RUN_NEXT_ENTRY  ; No match - trampoline
+RUN_CMP_MATCH:
     INY
     CPY #$08            ; Max 8 chars
     BNE RUN_CMP_LOOP
@@ -1195,14 +1222,58 @@ RUN_CMP_END:
     STA $37             ; Size high
 
     ; Load file to $0800
+    ; $36-$37 = file size, need to calculate sector count
     LDA #$00
     STA $32             ; Load address low
     LDA #$08
     STA $33             ; Load address high ($0800)
 
+    ; Calculate number of sectors: (size + 511) / 512
+    ; Simplified: high byte / 2, round up if any remainder
+    LDA $37             ; Size high byte
+    LSR A               ; Divide by 2 (512 bytes = 2 pages)
+    STA $3A             ; Sector count
+    LDA $36             ; Size low byte
+    ORA $37             ; Check if any low byte or odd high
+    BEQ RUN_ONE_SEC     ; Size is 0 or exact multiple
+    LDA $37
+    AND #$01            ; Check if high byte is odd
+    BEQ RUN_CHECK_LOW
+    INC $3A             ; Add sector for odd high byte
+RUN_CHECK_LOW:
+    LDA $36             ; Check low byte
+    BEQ RUN_LOAD
+    INC $3A             ; Add sector for remainder
+    JMP RUN_LOAD
+RUN_ONE_SEC:
+    LDA #$01
+    STA $3A             ; At least one sector
+
+RUN_LOAD:
+    ; Load sectors in a loop
+RUN_LOAD_LOOP:
+    LDA $3A
+    BEQ RUN_LOAD_DONE   ; No more sectors
+
     JSR $F200           ; DISK_READ (loads one sector)
     BCS RUN_NOTFOUND
 
+    ; Advance to next sector
+    INC $30
+    BNE RUN_NO_CARRY1
+    INC $31
+RUN_NO_CARRY1:
+
+    ; Advance buffer by 512 bytes (2 pages)
+    CLC
+    LDA $33
+    ADC #$02
+    STA $33
+
+    DEC $3A             ; Decrement sector count
+    JMP RUN_LOAD_LOOP
+
+RUN_LOAD_DONE:
     ; Jump to loaded program
     JMP $0800
 
@@ -1218,7 +1289,8 @@ RUN_NEXT_ENTRY:
 
     INX
     CPX #$10            ; 16 entries per sector
-    BNE RUN_SEARCH
+    BEQ RUN_NEXT_SECTOR
+    JMP RUN_SEARCH      ; Trampoline for far branch
 
 RUN_NEXT_SECTOR:
     INC $38
