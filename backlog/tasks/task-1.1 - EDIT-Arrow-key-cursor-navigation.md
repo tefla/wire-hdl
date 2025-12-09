@@ -4,11 +4,12 @@ title: 'EDIT: Arrow key cursor navigation'
 status: To Do
 assignee: []
 created_date: '2025-12-09 13:16'
-updated_date: '2025-12-09 13:18'
+updated_date: '2025-12-09 13:36'
 labels:
   - editor
   - navigation
-dependencies: []
+dependencies:
+  - task-1.7
 parent_task_id: task-1
 priority: high
 ---
