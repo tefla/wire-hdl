@@ -293,6 +293,7 @@ PARSE_LINE:
         INC LINENUM+1
 
 PL_START:
+        LDY #0              ; Initialize Y for source indexing
         JSR SKIP_SPACE
         JSR GET_TOKEN
 
@@ -879,7 +880,7 @@ PL_DIRECTIVE:
         STA CURPC
         LDA OPERAND+1
         STA CURPC+1
-        RTS
+        JMP PL_DONE
 
 DIR_NOT_ORG:
         ; Check for .DB / .BYTE
@@ -909,7 +910,7 @@ DIR_DB_LOOP:
         JSR SKIP_SPACE
         JMP DIR_DB_LOOP
 DIR_DB_DONE:
-        RTS
+        JMP PL_DONE
 
 DIR_DW:
         JSR SKIP_SPACE
@@ -927,7 +928,7 @@ DIR_DW_LOOP:
         JSR SKIP_SPACE
         JMP DIR_DW_LOOP
 DIR_DW_DONE:
-        RTS
+        JMP PL_DONE
 
 DIR_DS:
         JSR SKIP_SPACE
@@ -946,7 +947,7 @@ DIR_DS_DEC:
         DEC OPERAND
         JMP DIR_DS_LOOP
 DIR_DS_DONE:
-        RTS
+        JMP PL_DONE
 
 DIR_NOT_DB:
         ; Check for .BYTE
@@ -962,12 +963,16 @@ DIR_UNKNOWN:
         LDA #<ERR_DIR
         LDX #>ERR_DIR
         JSR PRINT_ERROR
-        RTS
+        JMP PL_DONE
 
 ; ==============================================================================
 ; Define Label (at current PC)
 ; ==============================================================================
 DEFINE_LABEL:
+        ; Save Y (ADD_SYMBOL corrupts it)
+        TYA
+        PHA
+
         LDA PASS
         CMP #1
         BNE DL_DONE         ; Only define in pass 1
@@ -981,12 +986,19 @@ DEFINE_LABEL:
         JSR SET_SYMBOL
 
 DL_DONE:
+        ; Restore Y
+        PLA
+        TAY
         RTS
 
 ; ==============================================================================
 ; Define EQU (with value in OPERAND)
 ; ==============================================================================
 DEFINE_EQU:
+        ; Save Y (ADD_SYMBOL corrupts it)
+        TYA
+        PHA
+
         LDA PASS
         CMP #1
         BNE DE_DONE
@@ -999,6 +1011,9 @@ DEFINE_EQU:
         JSR SET_SYMBOL
 
 DE_DONE:
+        ; Restore Y
+        PLA
+        TAY
         RTS
 
 ; ==============================================================================
@@ -1173,7 +1188,7 @@ GL_DONE:
 ; Token Handling
 ; ==============================================================================
 GET_TOKEN:
-        LDY #0
+        ; Note: Y should already be set by caller (offset from SRCPTR)
         LDA (SRCPTR),Y
         BEQ GT_EOF_JMP
         CMP #$0A
@@ -1688,8 +1703,10 @@ PD_DIG:
 
 PRINT_ERROR:
         ; Print error message, then line number
-        STA TMPPTR
-        STX TMPPTR+1
+        ; Save message pointer on stack (TMPPTR is clobbered by PRINT_STR)
+        PHA
+        TXA
+        PHA
 
         LDA #1
         STA ERRFLAG
@@ -1699,9 +1716,10 @@ PRINT_ERROR:
         LDX #>ERR_PREFIX
         JSR PRINT_STR
 
-        ; Print error message
-        LDA TMPPTR
-        LDX TMPPTR+1
+        ; Print error message (restore from stack)
+        PLA
+        TAX
+        PLA
         JSR PRINT_STR
 
         ; Print " at line "

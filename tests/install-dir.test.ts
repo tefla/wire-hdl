@@ -320,8 +320,8 @@ describe('INSTALL and DIR integration', () => {
     }
   });
 
-  it.skip('should run ASM TEST.ASM', () => {
-    // TODO: Debug ASM.COM assembly loop - it loads file and starts but gets stuck
+  it('should run ASM TEST.ASM', () => {
+    // Test ASM.COM execution
     const computer = new TestComputer();
 
     // Create and insert floppy disk
@@ -368,8 +368,54 @@ describe('INSTALL and DIR integration', () => {
 
     expect(sawBanner).toBe(true);
 
-    // Run more to see what happens
-    computer.run(10000000);
+    // Run more to see what happens - but trace key variables
+    console.log('--- Starting assembly loop trace ---');
+    console.log('SRCPTR ($60-$61):', computer.memory[0x60].toString(16), computer.memory[0x61].toString(16));
+    console.log('PASS ($38):', computer.memory[0x38]);
+    console.log('LINENUM ($3A-$3B):', computer.memory[0x3a], computer.memory[0x3b]);
+
+    // Show source around current position
+    const srcptr = computer.memory[0x60] | (computer.memory[0x61] << 8);
+    console.log('Source at SRCPTR (raw bytes):', Array.from(computer.memory.slice(srcptr, srcptr + 20)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    console.log('Source at SRCPTR:', String.fromCharCode(...computer.memory.slice(srcptr, srcptr + 40).filter(b => b >= 0x20 && b < 0x7f)));
+    console.log('MNEMBUF ($40-$47):', String.fromCharCode(...computer.memory.slice(0x40, 0x48).filter(b => b >= 0x20 && b < 0x7f)));
+    console.log('LABELBUF ($48-$4F):', String.fromCharCode(...computer.memory.slice(0x48, 0x50).filter(b => b >= 0x20 && b < 0x7f)));
+
+    // Show the beginning of the source to understand offsets
+    console.log('First 120 bytes of source:');
+    let lines = '';
+    for (let i = 0; i < 120; i++) {
+      const b = computer.memory[0x2000 + i];
+      if (b === 0x0a) lines += `[${i}:LF]`;
+      else if (b >= 0x20 && b < 0x7f) lines += String.fromCharCode(b);
+      else lines += `[${i}:${b.toString(16)}]`;
+    }
+    console.log(lines);
+
+    // Run in smaller chunks to trace what's happening
+    for (let i = 0; i < 100; i++) {
+      computer.run(100000);
+      const pc = computer.cpu.pc;
+      const srcptrLo = computer.memory[0x60];
+      const srcptrHi = computer.memory[0x61];
+      const srcptr = srcptrLo | (srcptrHi << 8);
+      const linenum = computer.memory[0x3a] | (computer.memory[0x3b] << 8);
+      const pass = computer.memory[0x38];
+      const errflag = computer.memory[0x39];
+      const toktype = computer.memory[0x59];
+
+      // Check if assembly completed (returned to shell area)
+      if (pc >= 0xc000 || computer.output.includes('bytes') || computer.output.includes('Error') || computer.output.includes('failed')) {
+        console.log(`Iteration ${i}: PC=$${pc.toString(16)}, SRCPTR=$${srcptr.toString(16)}, LINE=${linenum}, PASS=${pass}, ERR=${errflag}, TOK=${toktype}`);
+        break;
+      }
+
+      // Sample every 10 iterations to see progress
+      if (i % 10 === 0) {
+        console.log(`Iteration ${i}: PC=$${pc.toString(16)}, SRCPTR=$${srcptr.toString(16)}, LINE=${linenum}, PASS=${pass}, ERR=${errflag}, TOK=${toktype}`);
+      }
+    }
+
     console.log('Final output:', computer.output);
     console.log('Final PC:', computer.cpu.pc.toString(16));
 
