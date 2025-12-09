@@ -9,7 +9,8 @@
 //
 // Root files:
 //   SHELL.COM   - WireOS Shell (loaded by boot loader)
-//   ASM0.COM    - Stage 0 Assembler
+//   ASM.COM     - Stage 1 Assembler (self-hosting, assembled from asm.asm)
+//   ASM0.COM    - Stage 0 Assembler placeholder
 //   EDIT.COM    - Text Editor
 //   CD.COM      - Change Directory
 //   MKDIR.COM   - Make Directory
@@ -229,6 +230,7 @@ export function createFloppyDisk(): Uint8Array[] {
   // Get files to include
   const shellResult = assembleShell();
   const asm0Result = assembleStage0();
+  const asmResult = assemble(ASM_ASM);  // Stage 1 assembler (self-hosting)
   const editResult = assembleEdit();
   const cdResult = assemble(CD_ASM);
   const mkdirResult = assemble(MKDIR_ASM);
@@ -240,22 +242,23 @@ export function createFloppyDisk(): Uint8Array[] {
   const BITMAP_SECTORS = WIREFS.BITMAP_SECTORS; // 16
   const DATA_START = WIREFS.DATA_START;    // 20
 
-  // Index 8 will be SRC directory (after the first 8 files 0-7)
-  const SRC_DIR_INDEX = 8;
+  // Index 9 will be SRC directory (after the first 9 files 0-8)
+  const SRC_DIR_INDEX = 9;
   const files: FileEntry[] = [
-    // Root files (indices 0-7)
+    // Root files (indices 0-8)
     // SHELL.COM must be first so boot loader can find it easily
     { name: 'SHELL', ext: 'COM', data: shellResult.bytes },
-    { name: 'ASM0', ext: 'COM', data: asm0Result.bytes },
+    { name: 'ASM', ext: 'COM', data: asmResult.bytes },  // Stage 1 assembler
+    { name: 'ASM0', ext: 'COM', data: asm0Result.bytes }, // Placeholder
     { name: 'EDIT', ext: 'COM', data: editResult.bytes },
     { name: 'CD', ext: 'COM', data: cdResult.bytes },
     { name: 'MKDIR', ext: 'COM', data: mkdirResult.bytes },
     { name: 'HELLO', ext: 'ASM', data: textToBytes(HELLO_ASM) },
     { name: 'TEST', ext: 'ASM', data: textToBytes(TEST_ASM) },
     { name: 'BEEP', ext: 'ASM', data: textToBytes(BEEP_ASM) },
-    // SRC directory (index 8)
+    // SRC directory (index 9)
     { name: 'SRC', ext: '', data: new Uint8Array(0), isDirectory: true },
-    // Files in SRC/ (indices 9+)
+    // Files in SRC/ (indices 10+)
     { name: 'SHELL', ext: 'ASM', data: textToBytes(SHELL_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'ASM', ext: 'ASM', data: textToBytes(ASM_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'ASM0', ext: 'ASM', data: textToBytes(ASM0_ASM), parentIndex: SRC_DIR_INDEX },

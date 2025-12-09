@@ -6,7 +6,10 @@
       "mcp__backlog__get_task_creation_guide",
       "mcp__backlog__task_create",
       "mcp__backlog__task_edit",
-      "mcp__backlog__task_archive"
+      "mcp__backlog__task_archive",
+      "Bash(npm test:*)",
+      "Bash(node -e:*)",
+      "Bash(npm run build:*)"
     ]
   }
 }
