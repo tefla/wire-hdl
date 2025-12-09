@@ -63,8 +63,14 @@ SCRATCH     = $7100       ; Scratch area
 PUTCHAR     = $F000
 GETCHAR     = $F040
 NEWLINE     = $F080
-DISK_READ   = $F220
+DISK_READ   = $F200
 DISK_WRITE  = $F240
+
+; Directory constants
+DIR_START   = 1             ; First directory sector
+DIR_SECTS   = 3             ; Number of directory sectors
+DIR_BUF     = $0400         ; Directory sector buffer
+CMD_BUF     = $0300         ; Command line buffer (set by shell)
 
 ; Zero page
 SRCPTR      = $30
@@ -87,6 +93,8 @@ TMPPTR      = $56
 CHARTMP     = $58
 TOKTYPE     = $59
 NUMVAL      = $5A
+FILESEC     = $5C          ; File start sector
+FILESIZE    = $5E          ; File size (16-bit)
 
 ; Token types
 TOK_EOF     = 0
@@ -132,6 +140,10 @@ MAIN:
         LDX #>BANNER
         JSR PRINT_STR
 
+        ; Load source file from command line argument
+        JSR LOAD_FILE
+        BCS MAIN_NOFILE   ; Carry set = error
+
         ; Pass 1 - collect symbols
         LDA #1
         STA PASS
@@ -165,6 +177,10 @@ MAIN:
         LDX #>MSG_BYTES
         JSR PRINT_STR
 
+        RTS
+
+MAIN_NOFILE:
+        ; Error message already printed by LOAD_FILE
         RTS
 
 MAIN_ERR:
@@ -1828,6 +1844,270 @@ ERR_DIR:
 
 ERR_SYMFUL:
         .DB "Symbol table full", 0
+
+; ==============================================================================
+; LOAD_FILE - Load source file from command line
+; ==============================================================================
+; Input: Command line at CMD_BUF ($0300), e.g., "ASM TEST.ASM"
+; Output: Carry clear = success, source loaded to SRC_BUF
+;         Carry set = error (message printed)
+; ==============================================================================
+LOAD_FILE:
+        ; Skip the command name to find the filename argument
+        LDX #0
+LF_SKIP_CMD:
+        LDA CMD_BUF,X
+        BEQ LF_NO_ARG_JMP   ; End of string, no argument
+        CMP #$20            ; Space?
+        BEQ LF_FOUND_SPACE
+        INX
+        BNE LF_SKIP_CMD
+LF_NO_ARG_JMP:
+        JMP LF_NO_ARG       ; Trampoline for far branch
+LF_NOT_FOUND_JMP:
+        JMP LF_NOT_FOUND    ; Trampoline for far branch
+LF_READ_ERR_JMP:
+        JMP LF_READ_ERROR   ; Trampoline for far branch
+LF_NEXT_ENTRY_JMP:
+        JMP LF_NEXT_ENTRY   ; Trampoline for far branch
+
+LF_FOUND_SPACE:
+        ; Skip spaces to get to filename
+        INX
+LF_SKIP_SPACES:
+        LDA CMD_BUF,X
+        BEQ LF_NO_ARG_JMP   ; End of string
+        CMP #$20            ; Space?
+        BNE LF_GOT_ARG
+        INX
+        BNE LF_SKIP_SPACES
+
+LF_GOT_ARG:
+        ; X now points to filename in CMD_BUF
+        ; Store argument pointer in TMPPTR
+        STX TMPPTR          ; Filename offset in CMD_BUF
+
+        ; Search directory for file
+        LDA #DIR_START
+        STA TMPPTR+1        ; Current sector (reuse high byte)
+        LDA #DIR_SECTS
+        STA CHARTMP         ; Remaining sectors
+
+LF_SECTOR:
+        ; Read directory sector into DIR_BUF
+        LDA TMPPTR+1        ; Sector number
+        STA $30
+        LDA #0
+        STA $31
+        LDA #<DIR_BUF
+        STA $32
+        LDA #>DIR_BUF
+        STA $33
+        JSR DISK_READ
+        BCS LF_NOT_FOUND_JMP
+
+        ; Search entries in this sector
+        LDA #<DIR_BUF
+        STA SYMPTR
+        LDA #>DIR_BUF
+        STA SYMPTR+1
+        LDX #0              ; Entry counter
+
+LF_SEARCH:
+        ; Check if entry is active (status byte = 1)
+        LDY #0
+        LDA (SYMPTR),Y
+        CMP #1
+        BNE LF_NEXT_ENTRY_JMP
+
+        ; Compare filename
+        LDX TMPPTR          ; Get filename offset
+        LDY #0              ; Entry filename offset
+
+LF_CMP_LOOP:
+        LDA CMD_BUF,X       ; Arg char
+        BEQ LF_CMP_END      ; End of arg = match (if entry also ends or is space-padded)
+        CMP #$20            ; Space ends filename
+        BEQ LF_CMP_END
+        CMP #$2E            ; '.' also ends name portion
+        BEQ LF_CMP_END
+
+        ; Get entry filename char at offset Y+1
+        STY CHARTMP         ; Save Y
+        TYA
+        CLC
+        ADC #1              ; Skip status byte
+        TAY
+        LDA (SYMPTR),Y      ; Entry filename char
+        LDY CHARTMP         ; Restore Y
+
+        ; Compare
+        CMP CMD_BUF,X
+        BNE LF_NEXT_ENTRY_JMP ; No match
+
+        INX
+        INY
+        CPY #8              ; Max 8 chars in name
+        BNE LF_CMP_LOOP
+
+LF_CMP_END:
+        ; Found matching file!
+        ; Get start sector from offset $0C-$0D
+        LDY #$0C
+        LDA (SYMPTR),Y
+        STA FILESEC
+        INY
+        LDA (SYMPTR),Y
+        STA FILESEC+1
+
+        ; Get file size from offset $0E-$0F
+        LDY #$0E
+        LDA (SYMPTR),Y
+        STA FILESIZE
+        INY
+        LDA (SYMPTR),Y
+        STA FILESIZE+1
+
+        ; Print "Loading " + filename
+        LDA #<MSG_LOADING
+        LDX #>MSG_LOADING
+        JSR PRINT_STR
+
+        ; Print filename from CMD_BUF
+        LDX TMPPTR
+LF_PRINT_NAME:
+        LDA CMD_BUF,X
+        BEQ LF_PRINT_DONE
+        CMP #$20
+        BEQ LF_PRINT_DONE
+        JSR PUTCHAR
+        INX
+        BNE LF_PRINT_NAME
+LF_PRINT_DONE:
+        JSR NEWLINE
+
+        ; Load file into SRC_BUF
+        ; For simplicity, load one sector at a time
+        LDA #<SRC_BUF
+        STA SRCPTR
+        LDA #>SRC_BUF
+        STA SRCPTR+1
+
+        ; Calculate number of sectors needed
+        LDA FILESIZE+1
+        LSR A               ; Divide by 2 (512 = 2 pages)
+        STA CHARTMP         ; Sector count high approximation
+        LDA FILESIZE
+        BEQ LF_NO_EXTRA
+        INC CHARTMP         ; Round up if any low bytes
+LF_NO_EXTRA:
+        LDA CHARTMP
+        BEQ LF_ONE_SECTOR   ; At least one sector
+        JMP LF_LOAD_LOOP
+LF_ONE_SECTOR:
+        LDA #1
+        STA CHARTMP
+
+LF_LOAD_LOOP:
+        ; Read sector
+        LDA FILESEC
+        STA $30
+        LDA FILESEC+1
+        STA $31
+        LDA SRCPTR
+        STA $32
+        LDA SRCPTR+1
+        STA $33
+        JSR DISK_READ
+        BCS LF_READ_ERROR
+
+        ; Advance to next sector
+        INC FILESEC
+        BNE LF_NO_CARRY
+        INC FILESEC+1
+LF_NO_CARRY:
+
+        ; Advance buffer pointer by 512 bytes (2 pages)
+        CLC
+        LDA SRCPTR+1
+        ADC #2
+        STA SRCPTR+1
+
+        ; Decrement sector count
+        DEC CHARTMP
+        BNE LF_LOAD_LOOP
+
+        ; Null-terminate the source (in case file doesn't end with null)
+        LDY #0
+        LDA #0
+        STA (SRCPTR),Y
+
+        ; Reset source pointer to start
+        LDA #<SRC_BUF
+        STA SRCPTR
+        LDA #>SRC_BUF
+        STA SRCPTR+1
+
+        CLC                 ; Success
+        RTS
+
+LF_NEXT_ENTRY:
+        ; Move to next entry (+32 bytes)
+        CLC
+        LDA SYMPTR
+        ADC #32
+        STA SYMPTR
+        LDA SYMPTR+1
+        ADC #0
+        STA SYMPTR+1
+
+        ; Check if we've done 16 entries
+        LDA SYMPTR
+        AND #$FF
+        CMP #$00            ; Wrapped to next page boundary after 16 entries (16*32=512)
+        BEQ LF_NEXT_SECTOR_CHECK
+        JMP LF_SEARCH
+
+LF_NEXT_SECTOR_CHECK:
+        ; Next sector
+        INC TMPPTR+1        ; Next sector number
+        DEC CHARTMP         ; Remaining sectors
+        BEQ LF_NOT_FOUND
+        JMP LF_SECTOR
+
+LF_NO_ARG:
+        LDA #<MSG_USAGE
+        LDX #>MSG_USAGE
+        JSR PRINT_STR
+        SEC                 ; Error
+        RTS
+
+LF_NOT_FOUND:
+        LDA #<MSG_NOTFOUND
+        LDX #>MSG_NOTFOUND
+        JSR PRINT_STR
+        SEC                 ; Error
+        RTS
+
+LF_READ_ERROR:
+        LDA #<MSG_READERR
+        LDX #>MSG_READERR
+        JSR PRINT_STR
+        SEC                 ; Error
+        RTS
+
+; File loading messages
+MSG_USAGE:
+        .DB "Usage: ASM <filename>", $0D, $0A, 0
+
+MSG_LOADING:
+        .DB "Loading ", 0
+
+MSG_NOTFOUND:
+        .DB "File not found", $0D, $0A, 0
+
+MSG_READERR:
+        .DB "Disk read error", $0D, $0A, 0
 
 ; End of assembler
         .DB 0
