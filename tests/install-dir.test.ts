@@ -493,7 +493,11 @@ describe('INSTALL and DIR integration', () => {
             const ext = String.fromCharCode(...sector.slice(offset + 9, offset + 12)).trim();
             const startSector = sector[offset + 0x0c] | (sector[offset + 0x0d] << 8);
             const size = sector[offset + 0x0e] | (sector[offset + 0x0f] << 8);
-            console.log(`  Entry ${entry}: ${name}.${ext} start=${startSector} size=${size}`);
+            const parent = sector[offset + 0x15] | (sector[offset + 0x16] << 8);
+            const attr = sector[offset + 0x14];
+            const isDir = (attr & 0x10) ? ' [DIR]' : '';
+            const entryIndex = (dirSector - 1) * 16 + entry;
+            console.log(`  Entry ${entryIndex}: ${name}.${ext}${isDir} start=${startSector} size=${size} parent=${parent.toString(16)}`);
           } else if (status === 0xe5) {
             // Unused, skip
           } else if (status !== 0) {
