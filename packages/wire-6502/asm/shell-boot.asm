@@ -1353,6 +1353,19 @@ RUN_SEARCH:
     JMP RUN_NEXT_ENTRY  ; Trampoline for inactive entry
 RUN_CHK_PARENT:
     ; Check parent directory matches current directory
+    ; Special case: .COM files in root (parent=$FFFF) are always visible
+    ; This allows system utilities to be run from any directory
+    LDY #$15
+    LDA ($34),Y
+    CMP #$FF            ; Is parent low byte $FF?
+    BNE RUN_NOT_ROOT    ; No, check normal parent match
+    INY
+    LDA ($34),Y
+    CMP #$FF            ; Is parent high byte $FF?
+    BEQ RUN_ENTRY_OK    ; Yes, parent=$FFFF (root) - allow it
+    DEY                 ; Restore Y to $15 for normal check
+RUN_NOT_ROOT:
+    ; Normal parent check
     LDY #$15
     LDA ($34),Y
     CMP CUR_DIR_LO

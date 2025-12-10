@@ -430,4 +430,57 @@ describe('ASM.COM Stage 1 Assembler', () => {
     expect(symbolNames).toContain('PUTCHAR');
     expect(symbolNames).toContain('NEWLINE');
   });
+
+  it('should assemble file in subdirectory (CD SRC, ASM HELLO.ASM)', () => {
+    const computer = new TestComputer();
+
+    // Create and insert floppy disk
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    computer.runUntilOutput('/>', 100000);
+    computer.clearOutput();
+
+    // Install files
+    computer.sendLine('INSTALL');
+    computer.runUntilOutput('Done', 500000);
+    computer.clearOutput();
+
+    // Check CUR_DIR before CD
+    const CUR_DIR_LO = 0x0240;
+    const CUR_DIR_HI = 0x0241;
+
+    // CD to SRC
+    computer.sendLine('CD SRC');
+    computer.runUntilOutput('/SRC/', 100000);
+    computer.clearOutput();
+
+    // Check CUR_DIR after CD - should be 9 (entry index of SRC)
+    expect(computer.memory[CUR_DIR_LO]).toBe(9);  // SRC is entry 9
+    expect(computer.memory[CUR_DIR_HI]).toBe(0);
+
+    // Try to assemble HELLO.ASM in SRC directory
+    computer.sendLine('ASM HELLO.ASM');
+
+    // Run until assembly completes or fails
+    for (let i = 0; i < 2000000; i++) {
+      computer.run(100);
+      if (computer.output.includes('Error') || computer.output.includes('Assembly complete') || computer.output.includes('not found') || computer.output.includes('?')) {
+        break;
+      }
+    }
+
+    // Should find the file and assemble it
+    expect(computer.output).not.toContain('?');
+    expect(computer.output).not.toContain('not found');
+    expect(computer.output).toContain('Assembly complete');
+  });
 });

@@ -2243,9 +2243,10 @@ LF_NEXT_ENTRY:
         STA SYMPTR+1
 
         ; Check if we've done 16 entries
-        LDA SYMPTR
-        AND #$FF
-        CMP #$00            ; Wrapped to next page boundary after 16 entries (16*32=512)
+        ; SYMPTR started at DIR_BUF ($0400), after 16 entries it's at $0600
+        ; Check if high byte has increased by 2 (512 bytes / 256 = 2 pages)
+        INX
+        CPX #16
         BEQ LF_NEXT_SECTOR_CHECK
         JMP LF_SEARCH
 
