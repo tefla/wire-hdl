@@ -71,6 +71,8 @@ DIR_START   = 1             ; First directory sector
 DIR_SECTS   = 3             ; Number of directory sectors
 DIR_BUF     = $0400         ; Directory sector buffer
 CMD_BUF     = $0300         ; Command line buffer (set by shell)
+CUR_DIR_LO  = $0240         ; Current directory index (low byte, from shell)
+CUR_DIR_HI  = $0241         ; Current directory index (high byte, $FF = root)
 
 ; Zero page
 ; Note: $30-$33 are reserved for BIOS disk I/O parameters
@@ -2085,6 +2087,17 @@ LF_SEARCH:
         CMP #1
         BNE LF_NEXT_ENTRY_JMP
 
+        ; Check parent directory matches current directory
+        ; Parent index is at offset $15-$16 in directory entry
+        LDY #$15
+        LDA (SYMPTR),Y
+        CMP CUR_DIR_LO
+        BNE LF_NEXT_ENTRY_JMP
+        INY
+        LDA (SYMPTR),Y
+        CMP CUR_DIR_HI
+        BNE LF_NEXT_ENTRY_JMP
+
         ; Compare filename
         LDX TMPPTR          ; Get filename offset
         LDY #0              ; Entry filename offset
@@ -2653,11 +2666,12 @@ SF_COPY_FNAME:
         LDA #0
         STA (SYMPTR),Y
 
-        ; Parent directory at offset $15-$16 ($FFFF = root)
+        ; Parent directory at offset $15-$16 (use current directory)
         LDY #$15
-        LDA #$FF
+        LDA CUR_DIR_LO
         STA (SYMPTR),Y
         INY
+        LDA CUR_DIR_HI
         STA (SYMPTR),Y
 
         ; Write directory sector back
