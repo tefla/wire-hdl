@@ -715,9 +715,9 @@ describe('Shell Bootstrap via Hex Loader', () => {
 
   it('should assemble shell correctly', () => {
     const { bytes, origin } = assembleShell();
-    expect(origin).toBe(0xC000);  // Shell now lives in ROM area to not conflict with loaded programs
+    expect(origin).toBe(0x7000);  // Shell loads at $7000 (above ASM.COM buffers, below I/O at $8000)
     expect(bytes.length).toBeGreaterThan(100);
-    expect(bytes.length).toBeLessThan(2500); // Shell includes TYPE, DEL, CD, RUN, INSTALL commands
+    expect(bytes.length).toBeLessThan(2700); // Shell includes TYPE, DEL, CD with dir lookup, RUN, INSTALL commands
     console.log(`Shell size: ${bytes.length} bytes`);
   });
 
@@ -730,8 +730,9 @@ describe('Shell Bootstrap via Hex Loader', () => {
     console.log('After boot:', computer.output);
     computer.clearOutput();
 
-    // Set load address to shell's actual origin (now $C000)
-    const originStr = origin.toString(16).toUpperCase();
+    // Set load address to shell's actual origin ($0800)
+    // Hex loader requires 4-digit addresses, so pad with leading zeros
+    const originStr = origin.toString(16).toUpperCase().padStart(4, '0');
     computer.sendLine(`L ${originStr}`);
     computer.run(50000);
     console.log(`After L ${originStr}:`, computer.output);
@@ -775,7 +776,8 @@ describe('Shell Bootstrap via Hex Loader', () => {
   // Helper to bootstrap shell
   function bootstrapShell(computer: BootstrapComputer): void {
     const { origin } = assembleShell();
-    const originStr = origin.toString(16).toUpperCase();
+    // Hex loader requires 4-digit addresses, so pad with leading zeros
+    const originStr = origin.toString(16).toUpperCase().padStart(4, '0');
 
     computer.runUntilOutput('>', 100000);
     computer.sendLine(`L ${originStr}`);

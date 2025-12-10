@@ -32,7 +32,7 @@
 ;   $30-$33: BIOS disk params (sector, buffer addr)
 ; ============================================================
 
-.ORG $C000
+.ORG $7000
 
 ; ============================================================
 ; Constants
@@ -982,81 +982,258 @@ DEL_NOTFOUND:
 ; ============================================================
 ; CMD_CD - Change directory
 ; ============================================================
-; Updates ENV_PATH with new directory
+; Updates ENV_PATH with new directory and CUR_DIR index
 ; ============================================================
 CMD_CD:
     LDX ARG_PTR
     LDA $0300,X
     BNE CD_DO
     ; No arg - go to root
-    LDA #$01
-    STA ENV_LEN
-    LDA #'/'
-    STA ENV_PATH
-    RTS
+    JMP CD_GO_ROOT
 
 CD_DO:
     ; Check for ".." (parent)
     LDA $0300,X
     CMP #$2E            ; '.'
-    BNE CD_SET
+    BNE CD_SEARCH
     LDA $0301,X
     CMP #$2E            ; '.'
-    BNE CD_SET
-    ; Go up one level
-    LDY ENV_LEN
-    DEY
-    BEQ CD_ROOT
-CD_PARENT:
-    DEY
-    BEQ CD_ROOT
-    LDA ENV_PATH,Y
-    CMP #'/'
-    BNE CD_PARENT
-    INY
-    STY ENV_LEN
+    BNE CD_SEARCH
+    ; Go up one level - need to find parent of current directory
+    LDA CUR_DIR_HI
+    CMP #$FF
+    BNE CD_FIND_PARENT
+    ; Already at root
     RTS
-CD_ROOT:
+
+CD_FIND_PARENT:
+    ; Read current directory's entry to get its parent
+    ; Entry index = CUR_DIR_LO + CUR_DIR_HI*256
+    ; Sector = CUR_DIR / 16 + 1, Offset = (CUR_DIR % 16) * 32
+    JSR CD_LOAD_CUR_ENTRY
+    ; Parent index is at offset $15-$16
+    LDY #$15
+    LDA ($34),Y
+    STA CUR_DIR_LO
+    INY
+    LDA ($34),Y
+    STA CUR_DIR_HI
+    ; Update path string
+    JMP CD_UPDATE_PATH_PARENT
+
+CD_SEARCH:
+    ; Search directory for matching entry
+    ; Save argument pointer
+    STX $3A             ; Save arg start index
+
+    ; Search through directory sectors
+    LDA #DIR_START
+    STA $38             ; Current sector
+    LDA #DIR_SECTS
+    STA $39             ; Remaining sectors
+    LDA #$00
+    STA $3B             ; Entry counter (for calculating index)
+
+CD_SEARCH_SECTOR:
+    ; Read sector to $0400
+    LDA $38
+    STA $30
+    LDA #$00
+    STA $31
+    LDA #$00
+    STA $32
+    LDA #$04
+    STA $33
+    JSR $F200           ; DISK_READ
+    BCC CD_READ_OK
+    JMP CD_NOT_FOUND
+CD_READ_OK:
+    ; Process 16 entries per sector
+    LDA #$00
+    STA $34             ; Buffer offset low
+    LDA #$04
+    STA $35             ; Buffer offset high
+    LDX #$00            ; Entry within sector
+
+CD_SEARCH_ENTRY:
+    ; Check status = $01 (active)
+    LDY #$00
+    LDA ($34),Y
+    CMP #$01
+    BEQ CD_CHK_ATTR
+    JMP CD_SEARCH_NEXT
+CD_CHK_ATTR:
+    ; Check attributes - must be directory ($10)
+    LDY #$14
+    LDA ($34),Y
+    AND #$10
+    BNE CD_CHK_PARENT
+    JMP CD_SEARCH_NEXT
+CD_CHK_PARENT:
+    ; Check parent matches current directory
+    LDY #$15
+    LDA ($34),Y
+    CMP CUR_DIR_LO
+    BEQ CD_CHK_PAR_HI
+    JMP CD_SEARCH_NEXT
+CD_CHK_PAR_HI:
+    INY
+    LDA ($34),Y
+    CMP CUR_DIR_HI
+    BEQ CD_CHK_NAME
+    JMP CD_SEARCH_NEXT
+CD_CHK_NAME:
+    ; Compare name with argument
+    LDY #$01            ; Entry name offset
+    LDX $3A             ; Argument index
+CD_CMP_NAME:
+    LDA ($34),Y
+    CMP #$20            ; Space in entry = end of name
+    BEQ CD_CMP_END
+    CMP $0300,X
+    BEQ CD_CMP_CONT
+    JMP CD_SEARCH_NEXT
+CD_CMP_CONT:
+    INX
+    INY
+    CPY #$09            ; Max 8 chars
+    BNE CD_CMP_NAME
+
+CD_CMP_END:
+    ; Check argument also ended
+    LDA $0300,X
+    BEQ CD_FOUND
+    CMP #$20            ; Space
+    BEQ CD_FOUND
+    CMP #'/'            ; Slash
+    BEQ CD_FOUND
+    ; Argument longer than entry name
+    JMP CD_SEARCH_NEXT_FAR
+
+CD_FOUND:
+    ; Found! Set CUR_DIR to entry index ($3B)
+    LDA $3B
+    STA CUR_DIR_LO
+    LDA #$00
+    STA CUR_DIR_HI
+    ; Update path
+    JMP CD_UPDATE_PATH
+
+CD_SEARCH_NEXT:
+    ; Move to next entry
+    CLC
+    LDA $34
+    ADC #$20            ; 32 bytes per entry
+    STA $34
+    BCC CD_SEARCH_NO_INC
+    INC $35
+CD_SEARCH_NO_INC:
+    INC $3B             ; Increment entry counter
+    INX
+    CPX #$10            ; 16 entries per sector
+    BEQ CD_NEXT_SECTOR
+    JMP CD_SEARCH_ENTRY
+
+CD_NEXT_SECTOR:
+    ; Next sector
+    INC $38
+    DEC $39
+    BEQ CD_NOT_FOUND
+    JMP CD_SEARCH_SECTOR
+
+CD_NOT_FOUND:
+    JSR PRINT_NOTFOUND
+    RTS
+
+CD_SEARCH_NEXT_FAR:
+    JMP CD_SEARCH_NEXT
+
+CD_GO_ROOT:
+    LDA #$FF
+    STA CUR_DIR_LO
+    STA CUR_DIR_HI
     LDA #$01
     STA ENV_LEN
     LDA #'/'
     STA ENV_PATH
     RTS
 
-CD_SET:
-    ; Set path to argument
-    LDY #$00
-    ; First add leading slash if not present
-    LDA $0300,X
+CD_LOAD_CUR_ENTRY:
+    ; Load directory entry for CUR_DIR into buffer at $0400
+    ; Calculate sector: entry_index / 16 + DIR_START
+    LDA CUR_DIR_LO
+    LSR A
+    LSR A
+    LSR A
+    LSR A               ; / 16
+    CLC
+    ADC #DIR_START
+    STA $30
+    LDA #$00
+    STA $31
+    LDA #$00
+    STA $32
+    LDA #$04
+    STA $33
+    JSR $F200           ; DISK_READ
+    ; Calculate offset: (entry_index % 16) * 32
+    LDA CUR_DIR_LO
+    AND #$0F            ; % 16
+    ASL A
+    ASL A
+    ASL A
+    ASL A
+    ASL A               ; * 32
+    STA $34
+    LDA #$04
+    STA $35
+    RTS
+
+CD_UPDATE_PATH_PARENT:
+    ; Update ENV_PATH by removing last component
+    LDY ENV_LEN
+    DEY
+    BEQ CD_AT_ROOT
+CD_BACK_LOOP:
+    DEY
+    BEQ CD_AT_ROOT
+    LDA ENV_PATH,Y
     CMP #'/'
-    BEQ CD_COPY
+    BNE CD_BACK_LOOP
+    INY
+    STY ENV_LEN
+    RTS
+CD_AT_ROOT:
+    LDA #$01
+    STA ENV_LEN
     LDA #'/'
     STA ENV_PATH
-    INY
+    RTS
 
-CD_COPY:
-    LDA $0300,X
-    BEQ CD_DONE
-    CMP #$20            ; Space ends path
-    BEQ CD_DONE
-    STA ENV_PATH,Y
+CD_UPDATE_PATH:
+    ; Add directory name to ENV_PATH
+    ; First, add the name from entry at ($34)
+    ; Use X for path position, save current Y to stack
+    TYA
+    PHA                 ; Save Y
+    LDX ENV_LEN         ; X = path position
+    LDY #$01            ; Y = entry name offset
+CD_COPY_NAME:
+    LDA ($34),Y
+    CMP #$20            ; Space = end of name
+    BEQ CD_ADD_SLASH
+    STA ENV_PATH,X
     INX
     INY
-    CPY #ENV_MAX
-    BCC CD_COPY
-
-CD_DONE:
-    ; Add trailing slash if not present
-    DEY
-    LDA ENV_PATH,Y
-    INY
-    CMP #'/'
-    BEQ CD_SAVE
+    CPY #$09            ; Max 8 chars
+    BNE CD_COPY_NAME
+CD_ADD_SLASH:
     LDA #'/'
-    STA ENV_PATH,Y
-    INY
-CD_SAVE:
-    STY ENV_LEN
+    STA ENV_PATH,X
+    INX
+    STX ENV_LEN
+    PLA
+    TAY                 ; Restore Y
     RTS
 
 ; ============================================================
@@ -1205,7 +1382,22 @@ RUN_CMP_MATCH:
     BNE RUN_CMP_LOOP
 
 RUN_CMP_END:
-    ; Found it! Get start sector from offset $0C-$0D
+    ; Check extension is COM (offset $09-$0B)
+    ; Only execute .COM files, skip .ASM etc
+    LDY #$09
+    LDA ($34),Y
+    CMP #$43            ; 'C'
+    BNE RUN_NEXT_ENTRY
+    INY
+    LDA ($34),Y
+    CMP #$4F            ; 'O'
+    BNE RUN_NEXT_ENTRY
+    INY
+    LDA ($34),Y
+    CMP #$4D            ; 'M'
+    BNE RUN_NEXT_ENTRY
+
+    ; Found .COM file! Get start sector from offset $0C-$0D
     LDY #$0C
     LDA ($34),Y
     STA $30             ; Start sector low
@@ -1274,8 +1466,11 @@ RUN_NO_CARRY1:
     JMP RUN_LOAD_LOOP
 
 RUN_LOAD_DONE:
-    ; Jump to loaded program
-    JMP $0800
+    ; Call loaded program (JSR so it can RTS back)
+    JSR $0800
+    ; After program exits, reload shell from disk (CP/M style)
+    ; This handles the case where the program overwrote our code
+    JMP $F280           ; BIOS.SHELL_RELOAD
 
 RUN_NEXT_ENTRY:
     ; Move to next entry (+32 bytes)

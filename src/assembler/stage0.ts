@@ -581,12 +581,12 @@ function parse(tokens: Token[]): { instructions: Instruction[]; labels: Map<stri
       } else if (directive === 'DW' || directive === 'WORD') {
         // Parse comma-separated word values (little-endian)
         while (true) {
-          const value = parseNumber();
-          // Low byte first
-          instructions.push({ mnemonic: '.DB', mode: 'data', operand: value & 0xff });
+          const expr = parseExpression();
+          // Low byte first - preserve label for forward reference resolution
+          instructions.push({ mnemonic: '.DB', mode: 'data', operand: expr.value & 0xff, label: expr.label, lowByte: true });
           pc += 1;
-          // High byte second
-          instructions.push({ mnemonic: '.DB', mode: 'data', operand: (value >> 8) & 0xff });
+          // High byte second - preserve label for forward reference resolution
+          instructions.push({ mnemonic: '.DB', mode: 'data', operand: (expr.value >> 8) & 0xff, label: expr.label, highByte: true });
           pc += 1;
           if (peek().type === 'COMMA') {
             advance();
@@ -916,7 +916,9 @@ function generate(instructions: Instruction[], labels: Map<string, number>, orig
 
       case 'data': {
         // .DB directive - just output the byte
-        bytes.push(operand! & 0xFF);
+        // Use addr which has resolved label (with lowByte/highByte extraction), or fall back to operand
+        const byte = (label !== undefined) ? addr! : operand!;
+        bytes.push(byte & 0xFF);
         pc += 1;
         break;
       }

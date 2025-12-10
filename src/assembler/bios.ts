@@ -17,6 +17,7 @@ export const BIOS = {
   CLEAR_SCREEN: 0xF140, // Clear screen and home cursor
   DISK_READ: 0xF200,  // Read sector ($30-$31=sector, $32-$33=buffer)
   DISK_WRITE: 0xF240, // Write sector ($30-$31=sector, $32-$33=buffer)
+  SHELL_RELOAD: 0xF280, // Reload shell from disk and jump to it
   ENTRY: 0xFF00,      // Reset entry point
   FONT_ROM: 0xE000,   // Font data (256 chars x 8 bytes)
 };
@@ -322,6 +323,61 @@ export function assembleBios(): Uint8Array {
       DISK_WRITE_ERR:
         SEC                 ; error
         RTS
+    ` },
+    // SHELL_RELOAD at $F280
+    // Reloads shell from disk and jumps to it
+    // Used after programs exit to restore shell (CP/M-style overlay)
+    // Boot sector layout: offset 6 = shell start sector, offset 7 = sector count
+    { origin: 0xF280, code: `
+      .ORG $F280
+      SHELL_RELOAD:
+        ; Read boot sector (sector 0) to get shell location info
+        LDA #$00
+        STA $30             ; sector low = 0
+        STA $31             ; sector high = 0
+        STA $32             ; buffer low = $00
+        LDA #$04
+        STA $33             ; buffer high = $04 ($0400)
+        JSR $F200           ; DISK_READ
+
+        ; Get shell info from boot sector
+        ; $0406 = shell start sector, $0407 = shell sector count
+        LDA $0406
+        STA $30             ; shell start sector
+        LDA #$00
+        STA $31             ; sector high = 0
+        LDA $0407
+        STA $3A             ; sector count
+
+        ; Load shell to $7000
+        LDA #$00
+        STA $32             ; buffer low
+        LDA #$70
+        STA $33             ; buffer high ($7000)
+
+      SHELL_LOAD_LOOP:
+        LDA $3A
+        BEQ SHELL_LOAD_DONE
+
+        JSR $F200           ; DISK_READ (one sector)
+
+        ; Next sector
+        INC $30
+        BNE SHELL_NO_CARRY
+        INC $31
+      SHELL_NO_CARRY:
+
+        ; Advance buffer by 512 bytes (2 pages)
+        CLC
+        LDA $33
+        ADC #$02
+        STA $33
+
+        DEC $3A
+        JMP SHELL_LOAD_LOOP
+
+      SHELL_LOAD_DONE:
+        JMP $7000           ; Jump to shell entry
     ` },
     // ENTRY at $FF00
     { origin: 0xFF00, code: `

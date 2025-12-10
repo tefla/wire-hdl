@@ -322,6 +322,7 @@ describe('INSTALL and DIR integration', () => {
 
   it('should run ASM TEST.ASM', () => {
     // Test ASM.COM execution
+    // Note: Detailed regression tests for symbol table are in asm-stage1.test.ts
     const computer = new TestComputer();
 
     // Create and insert floppy disk
@@ -349,83 +350,122 @@ describe('INSTALL and DIR integration', () => {
     // Now try ASM TEST.ASM
     computer.sendLine('ASM TEST.ASM');
 
-    // Run until we see ASM's banner "Assembler"
-    const sawBanner = computer.runUntilOutput('Assembler', 500000);
-    console.log('Output after ASM command:', computer.output);
-    console.log('PC after ASM command:', computer.cpu.pc.toString(16));
-
-    // Debug: dump memory at critical areas
-    console.log('Memory at $0200:', Array.from(computer.memory.slice(0x200, 0x210)).map(b => b.toString(16).padStart(2, '0')).join(' '));
-    console.log('Memory at $0300 (CMD_BUF):', Array.from(computer.memory.slice(0x300, 0x320)).map(b => b.toString(16).padStart(2, '0')).join(' '));
-    console.log('CMD_BUF as string:', String.fromCharCode(...computer.memory.slice(0x300, 0x320).filter(b => b >= 0x20 && b < 0x7f)));
-    console.log('Zero page $50-$5F:', Array.from(computer.memory.slice(0x50, 0x60)).map(b => b.toString(16).padStart(2, '0')).join(' '));
-    console.log('TMPPTR ($56-$57):', computer.memory[0x56].toString(16), computer.memory[0x57].toString(16));
-    console.log('FILESEC ($5C):', computer.memory[0x5c].toString(16));
-    console.log('FILESIZE ($5E-$5F):', computer.memory[0x5e].toString(16), computer.memory[0x5f].toString(16));
-    console.log('Memory at $0800 (ASM entry):', Array.from(computer.memory.slice(0x800, 0x820)).map(b => b.toString(16).padStart(2, '0')).join(' '));
-    console.log('Memory at $2000 (SRC_BUF):', Array.from(computer.memory.slice(0x2000, 0x2040)).map(b => b.toString(16).padStart(2, '0')).join(' '));
-    console.log('SRC_BUF as string:', String.fromCharCode(...computer.memory.slice(0x2000, 0x2100).filter(b => b >= 0x20 && b < 0x7f)).substring(0, 100));
-
-    expect(sawBanner).toBe(true);
-
-    // Run more to see what happens - but trace key variables
-    console.log('--- Starting assembly loop trace ---');
-    console.log('SRCPTR ($60-$61):', computer.memory[0x60].toString(16), computer.memory[0x61].toString(16));
-    console.log('PASS ($38):', computer.memory[0x38]);
-    console.log('LINENUM ($3A-$3B):', computer.memory[0x3a], computer.memory[0x3b]);
-
-    // Show source around current position
-    const srcptr = computer.memory[0x60] | (computer.memory[0x61] << 8);
-    console.log('Source at SRCPTR (raw bytes):', Array.from(computer.memory.slice(srcptr, srcptr + 20)).map(b => b.toString(16).padStart(2, '0')).join(' '));
-    console.log('Source at SRCPTR:', String.fromCharCode(...computer.memory.slice(srcptr, srcptr + 40).filter(b => b >= 0x20 && b < 0x7f)));
-    console.log('MNEMBUF ($40-$47):', String.fromCharCode(...computer.memory.slice(0x40, 0x48).filter(b => b >= 0x20 && b < 0x7f)));
-    console.log('LABELBUF ($48-$4F):', String.fromCharCode(...computer.memory.slice(0x48, 0x50).filter(b => b >= 0x20 && b < 0x7f)));
-
-    // Show the beginning of the source to understand offsets
-    console.log('First 120 bytes of source:');
-    let lines = '';
-    for (let i = 0; i < 120; i++) {
-      const b = computer.memory[0x2000 + i];
-      if (b === 0x0a) lines += `[${i}:LF]`;
-      else if (b >= 0x20 && b < 0x7f) lines += String.fromCharCode(b);
-      else lines += `[${i}:${b.toString(16)}]`;
-    }
-    console.log(lines);
-
-    // Run in smaller chunks to trace what's happening
-    for (let i = 0; i < 100; i++) {
-      computer.run(100000);
-      const pc = computer.cpu.pc;
-      const srcptrLo = computer.memory[0x60];
-      const srcptrHi = computer.memory[0x61];
-      const srcptr = srcptrLo | (srcptrHi << 8);
-      const linenum = computer.memory[0x3a] | (computer.memory[0x3b] << 8);
-      const pass = computer.memory[0x38];
-      const errflag = computer.memory[0x39];
-      const toktype = computer.memory[0x59];
-
-      // Check if assembly completed (returned to shell area)
-      if (pc >= 0xc000 || computer.output.includes('bytes') || computer.output.includes('Error') || computer.output.includes('failed')) {
-        console.log(`Iteration ${i}: PC=$${pc.toString(16)}, SRCPTR=$${srcptr.toString(16)}, LINE=${linenum}, PASS=${pass}, ERR=${errflag}, TOK=${toktype}`);
-        break;
+    // Run until we see output or error
+    let errorFound = false;
+    for (let i = 0; i < 100000 && !errorFound; i++) {
+      computer.run(100);
+      if (computer.output.includes('Error')) {
+        errorFound = true;
+        console.log('ASM Error:', computer.output);
       }
-
-      // Sample every 10 iterations to see progress
-      if (i % 10 === 0) {
-        console.log(`Iteration ${i}: PC=$${pc.toString(16)}, SRCPTR=$${srcptr.toString(16)}, LINE=${linenum}, PASS=${pass}, ERR=${errflag}, TOK=${toktype}`);
+      if (computer.output.includes('/>')) {
+        break;  // Back to prompt, assembly complete
       }
     }
 
-    console.log('Final output:', computer.output);
-    console.log('Final PC:', computer.cpu.pc.toString(16));
-
-    // Check if we get any error or success message
-    const hasError = computer.output.includes('Error');
-    const hasSuccess = computer.output.includes('bytes');
-    console.log('Has error:', hasError, 'Has success:', hasSuccess);
-
-    // We should see ASM loading the file
+    // We should see ASM loading the file and succeeding without error
     expect(computer.output).toContain('Loading');
+    expect(computer.output).not.toContain('Error');
+  });
+
+  it('should save .COM file after assembly', () => {
+    // This tests the ASM.COM file save feature
+    const computer = new TestComputer();
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell directly
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    computer.runUntilOutput('/>', 100000);
+    computer.clearOutput();
+
+    // Install first
+    computer.sendLine('INSTALL');
+    computer.runUntilOutput('Done', 500000);
+    computer.clearOutput();
+
+    // Run ASM TEST.ASM - should assemble and save TEST.COM
+    computer.sendLine('ASM TEST.ASM');
+
+    // Wait for assembly to complete and file to be saved
+    const gotSaved = computer.runUntilOutput('Saved', 2000000);
+    expect(gotSaved).toBe(true);
+    console.log('After ASM (with save):', computer.output);
+
+    // Verify output shows saving
+    expect(computer.output).toContain('Assembly complete');
+    expect(computer.output).toContain('Saving TEST.COM');
+    expect(computer.output).toContain('Saved');
+
+    // Wait for shell to reload
+    const gotPrompt = computer.runUntilOutput('/>', 500000);
+    expect(gotPrompt).toBe(true);
+
+    computer.clearOutput();
+
+    // Check DIR shows TEST.COM
+    computer.sendLine('DIR');
+    const gotDir = computer.runUntilOutput('/>', 100000);
+    expect(gotDir).toBe(true);
+    console.log('DIR after ASM:', computer.output);
+
+    // Should see TEST.COM in directory listing
+    expect(computer.output).toContain('TEST.COM');
+  });
+
+  it('should reload shell after program exits (CP/M-style overlay)', () => {
+    // This tests the shell reload mechanism (BIOS.SHELL_RELOAD at $F280)
+    // When a program runs, it may overwrite shell memory. After program
+    // exits (RTS), shell is reloaded from disk via the ROM stub.
+    const computer = new TestComputer();
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell directly
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    computer.runUntilOutput('/>', 100000);
+    computer.clearOutput();
+
+    // Install first
+    computer.sendLine('INSTALL');
+    computer.runUntilOutput('Done', 500000);
+    computer.clearOutput();
+
+    // Run ASM TEST.ASM - this will load ASM.COM at $0800
+    // ASM.COM may use memory that overlaps with shell
+    computer.sendLine('ASM TEST.ASM');
+
+    // Wait for assembly to complete
+    const gotComplete = computer.runUntilOutput('Assembly complete', 2000000);
+    expect(gotComplete).toBe(true);
+    console.log('After ASM:', computer.output);
+
+    // Now wait for shell to reload and show prompt
+    const gotPrompt = computer.runUntilOutput('/>', 500000);
+    expect(gotPrompt).toBe(true);
+
+    computer.clearOutput();
+
+    // Verify shell is working by running another command
+    computer.sendLine('VER');
+    const gotVer = computer.runUntilOutput('WireOS', 100000);
+    expect(gotVer).toBe(true);
+    console.log('After VER:', computer.output);
+
+    // Should show version and get back to prompt
+    expect(computer.output).toContain('v1.0');
   });
 
   it('should check floppy disk layout', () => {

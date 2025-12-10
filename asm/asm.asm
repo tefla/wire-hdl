@@ -98,6 +98,7 @@ NUMVAL      = $5A
 FILESEC     = $5C          ; File start sector
 FILESIZE    = $5E          ; File size (16-bit)
 DIRSEC      = $64          ; Current directory sector being searched
+FNAMEOFF    = $66          ; Filename offset in CMD_BUF (preserved for SAVE_FILE)
 
 ; Token types
 TOK_EOF     = 0
@@ -170,9 +171,11 @@ MAIN:
         SEC
         LDA OUTPTR
         SBC #<OUT_BUF
+        STA FILESIZE        ; Store output size for SAVE_FILE
         PHA
         LDA OUTPTR+1
         SBC #>OUT_BUF
+        STA FILESIZE+1
         TAX
         PLA
         JSR PRINT_HEX16
@@ -180,6 +183,14 @@ MAIN:
         LDX #>MSG_BYTES
         JSR PRINT_STR
 
+        ; Save output to .COM file
+        JSR SAVE_FILE
+        BCS MAIN_SAVE_ERR
+
+        RTS
+
+MAIN_SAVE_ERR:
+        ; Save failed message already printed
         RTS
 
 MAIN_NOFILE:
@@ -1030,8 +1041,10 @@ AS_LOOP:
         JSR GET_SYM_PTR
         LDY #0
         LDA (TMPPTR),Y
+        STA CHARTMP         ; Save result (is slot empty?)
         PLA
         TAX
+        LDA CHARTMP         ; Reload to set Z flag
         BEQ AS_EMPTY
         ; Check if name matches
         TXA
@@ -1077,7 +1090,12 @@ SET_SYMBOL:
         RTS
 
 ; Lookup label in LABELBUF, set carry if not found
+; Note: Preserves Y register (source offset)
 LOOKUP_LABEL:
+        ; Save Y (callers need it preserved for source parsing)
+        TYA
+        PHA
+
         LDX #0
 LL_LOOP:
         TXA
@@ -1093,11 +1111,16 @@ LL_LOOP:
         INX
         CPX #SYM_MAX
         BNE LL_LOOP
+        ; Not found - restore Y and return with carry set
+        PLA
+        TAY
         SEC
         RTS
 
 LL_NOTFOUND:
-        PLA
+        PLA                 ; Pop X from LL_LOOP
+        PLA                 ; Restore Y
+        TAY
         SEC
         RTS
 
@@ -1109,31 +1132,42 @@ LL_FOUND:
         INY
         LDA (TMPPTR),Y
         STA SYMVAL+1
+        ; Restore Y and return with carry clear
+        PLA
+        TAY
         CLC
         RTS
 
 ; Get pointer to symbol X in TMPPTR
+; TMPPTR = SYM_TAB + X * 16
 GET_SYM_PTR:
+        ; Start with base address
         LDA #<SYM_TAB
         STA TMPPTR
         LDA #>SYM_TAB
         STA TMPPTR+1
         TXA
         BEQ GSP_DONE
-        ; Multiply X by 16
-        ASL A
-        ROL TMPPTR+1
-        ASL A
-        ROL TMPPTR+1
-        ASL A
-        ROL TMPPTR+1
-        ASL A
-        ROL TMPPTR+1
+        ; Multiply X by 16 and add to TMPPTR
+        ; X*16 = X << 4
+        ; Low byte of result = (X << 4) & $FF = (X & $0F) << 4
+        ; High byte of result = X >> 4
+        TXA                 ; A = X
+        ASL A               ; A = X*2
+        ASL A               ; A = X*4
+        ASL A               ; A = X*8
+        ASL A               ; A = X*16 (low byte, high nibble lost)
+        ; Add low byte to TMPPTR
         CLC
         ADC TMPPTR
         STA TMPPTR
-        LDA #0
-        ADC TMPPTR+1
+        ; Calculate and add high byte
+        TXA                 ; A = X
+        LSR A               ; A = X/2
+        LSR A               ; A = X/4
+        LSR A               ; A = X/8
+        LSR A               ; A = X/16 = high byte of X*16
+        ADC TMPPTR+1        ; Add with carry from low byte addition
         STA TMPPTR+1
 GSP_DONE:
         RTS
@@ -1433,7 +1467,12 @@ HD_DIG:
 ; ==============================================================================
 ; Mnemonic Lookup - Find mnemonic index
 ; ==============================================================================
+; Note: Preserves Y register (source offset)
 LOOKUP_MNEM:
+        ; Save Y - callers need it for source parsing
+        TYA
+        PHA
+
         LDX #0
 LM_LOOP:
         ; Get pointer to mnemonic entry
@@ -1464,6 +1503,8 @@ LM_LOOP:
 
         ; Found it!
         STX OPCODE          ; Save index
+        PLA                 ; Restore Y
+        TAY
         CLC
         RTS
 
@@ -1473,6 +1514,8 @@ LM_NEXT:
         BNE LM_LOOP
 
 LM_NOTFOUND:
+        PLA                 ; Restore Y
+        TAY
         SEC
         RTS
 
@@ -1482,6 +1525,9 @@ LM_NOTFOUND:
 LOOKUP_OPCODE:
         ; OPCODE has mnemonic index, ADDRMODE has addressing mode
         ; Look up in opcode table
+        ; Save Y - callers need it for source parsing
+        TYA
+        PHA
         LDA OPCODE
         ASL A
         ASL A
@@ -1505,12 +1551,27 @@ LOOKUP_OPCODE:
 
         ; Check if this mnemonic supports this mode
         ; Branch instructions only support relative
+        ; Branches are: BCC(3), BCS(4), BEQ(5), BMI(7), BNE(8), BPL(9), BVC(11), BVS(12)
         LDA OPCODE
-        CMP #16             ; First branch instruction
-        BCC LO_NORMAL
-        CMP #24             ; Last branch + 1
-        BCS LO_NORMAL
+        CMP #3              ; BCC
+        BEQ LO_IS_BRANCH
+        CMP #4              ; BCS
+        BEQ LO_IS_BRANCH
+        CMP #5              ; BEQ
+        BEQ LO_IS_BRANCH
+        CMP #7              ; BMI
+        BEQ LO_IS_BRANCH
+        CMP #8              ; BNE
+        BEQ LO_IS_BRANCH
+        CMP #9              ; BPL
+        BEQ LO_IS_BRANCH
+        CMP #11             ; BVC
+        BEQ LO_IS_BRANCH
+        CMP #12             ; BVS
+        BEQ LO_IS_BRANCH
+        JMP LO_NORMAL
 
+LO_IS_BRANCH:
         ; It's a branch - use relative mode
         LDA #AM_REL
         STA ADDRMODE
@@ -1533,10 +1594,14 @@ LO_NORMAL:
         BEQ LO_INVALID
 
         STA OPCODE          ; Now OPCODE is the actual opcode byte
+        PLA                 ; Restore Y
+        TAY
         CLC
         RTS
 
 LO_INVALID:
+        PLA                 ; Restore Y
+        TAY
         SEC
         RTS
 
@@ -1551,11 +1616,17 @@ EMIT_INSTR:
         ; Output operand based on addressing mode
         LDA ADDRMODE
         CMP #AM_IMP
-        BEQ EI_DONE
+        BEQ EI_DONE_JMP
         CMP #AM_ACC
-        BEQ EI_DONE
+        BEQ EI_DONE_JMP
         CMP #AM_REL
-        BEQ EI_REL
+        BEQ EI_REL_JMP
+        JMP EI_CHK_OTHER
+EI_DONE_JMP:
+        JMP EI_DONE
+EI_REL_JMP:
+        JMP EI_REL
+EI_CHK_OTHER:
         CMP #AM_IMM
         BEQ EI_ONE
         CMP #AM_ZP
@@ -1583,10 +1654,12 @@ EI_ONE:
 
 EI_REL:
         ; Calculate relative offset
-        ; Offset = target - (PC + 2)
+        ; Offset = target - (PC after instruction)
+        ; Note: CURPC already incremented by 1 after emitting opcode,
+        ; so we only add 1 more to get address after operand byte
         LDA CURPC
         CLC
-        ADC #2
+        ADC #1
         STA TMPPTR
         LDA CURPC+1
         ADC #0
@@ -1599,6 +1672,19 @@ EI_REL:
         LDA OPERAND+1
         SBC TMPPTR+1
 
+        ; In pass 1, skip range check (forward refs may be undefined)
+        PHA                 ; Save high byte result
+        LDA PASS
+        CMP #1
+        BNE EI_CHK_RANGE
+        ; Pass 1 - emit placeholder
+        PLA                 ; Discard high byte
+        PLA                 ; Get low byte
+        JSR EMIT_BYTE
+        RTS
+
+EI_CHK_RANGE:
+        PLA                 ; Restore high byte for check
         ; Check range (-128 to +127)
         BEQ EI_REL_POS
         CMP #$FF
@@ -1631,13 +1717,17 @@ EI_DONE:
 ; ==============================================================================
 EMIT_BYTE:
         ; Only emit in pass 2
+        ; Save Y - callers need it for source parsing
+        PHA
+        TYA
         PHA
         LDA PASS
         CMP #2
         BNE EB_SKIP
 
-        PLA
-        PHA
+        ; Get byte to emit (from stack)
+        TSX
+        LDA $0102,X         ; Byte is 2 entries up
         LDY #0
         STA (OUTPTR),Y
         INC OUTPTR
@@ -1645,6 +1735,10 @@ EMIT_BYTE:
         INC OUTPTR+1
 
 EB_SKIP:
+        ; Restore Y
+        PLA
+        TAY
+        ; Get original byte
         PLA
         ; Always increment PC
         INC CURPC
@@ -1954,8 +2048,9 @@ LF_SKIP_SPACES:
 
 LF_GOT_ARG:
         ; X now points to filename in CMD_BUF
-        ; Store argument pointer in TMPPTR
-        STX TMPPTR          ; Filename offset in CMD_BUF
+        ; Store argument pointer in TMPPTR and FNAMEOFF
+        STX TMPPTR          ; Filename offset in CMD_BUF (temp use)
+        STX FNAMEOFF        ; Preserve filename offset for SAVE_FILE
 
         ; Search directory for file
         LDA #DIR_START
@@ -2169,6 +2264,431 @@ LF_READ_ERROR:
         SEC                 ; Error
         RTS
 
+; ==============================================================================
+; SAVE_FILE - Save assembled output as .COM file
+; ==============================================================================
+; Input: FILESIZE = output size (set after assembly)
+;        TMPPTR = offset to input filename in CMD_BUF (set by LOAD_FILE)
+; Output: Carry clear = success, Carry set = error
+;
+; Algorithm:
+; 1. Build output filename (input name with .COM extension)
+; 2. Find free directory entry
+; 3. Find free sectors using bitmap
+; 4. Write output buffer to disk
+; 5. Update directory entry
+; ==============================================================================
+SAVE_FILE:
+        ; Print "Saving "
+        LDA #<MSG_SAVING
+        LDX #>MSG_SAVING
+        JSR PRINT_STR
+
+        ; Build output filename - copy name portion (up to 8 chars)
+        LDX FNAMEOFF        ; Source filename offset in CMD_BUF (preserved from LOAD_FILE)
+        LDY #0              ; Output filename index
+SF_COPY_NAME:
+        LDA CMD_BUF,X
+        BEQ SF_PAD_NAME     ; End of string
+        CMP #$20            ; Space
+        BEQ SF_PAD_NAME
+        CMP #$2E            ; '.'
+        BEQ SF_PAD_NAME
+        STA SCRATCH,Y       ; Store in scratch area (output filename)
+        ; Also print the char
+        JSR PUTCHAR
+        INX
+        INY
+        CPY #8
+        BNE SF_COPY_NAME
+
+SF_PAD_NAME:
+        ; Pad name with spaces to 8 chars
+        LDA #$20
+SF_PAD_LOOP:
+        CPY #8
+        BEQ SF_ADD_EXT
+        STA SCRATCH,Y
+        INY
+        JMP SF_PAD_LOOP
+
+SF_ADD_EXT:
+        ; Add .COM extension
+        LDA #$43            ; 'C'
+        STA SCRATCH+8
+        LDA #$4F            ; 'O'
+        STA SCRATCH+9
+        LDA #$4D            ; 'M'
+        STA SCRATCH+10
+        ; Print ".COM"
+        LDA #$2E
+        JSR PUTCHAR
+        LDA #$43
+        JSR PUTCHAR
+        LDA #$4F
+        JSR PUTCHAR
+        LDA #$4D
+        JSR PUTCHAR
+        JSR NEWLINE
+
+        ; Find a free directory entry (or reuse existing with same name)
+        LDA #DIR_START
+        STA DIRSEC
+        LDA #DIR_SECTS
+        STA CHARTMP         ; Sectors remaining
+
+SF_DIR_SECTOR:
+        ; Read directory sector
+        LDA DIRSEC
+        STA $30
+        LDA #0
+        STA $31
+        LDA #<DIR_BUF
+        STA $32
+        LDA #>DIR_BUF
+        STA $33
+        JSR DISK_READ
+        BCC SF_DIR_OK
+        JMP SF_WRITE_ERR
+SF_DIR_OK:
+
+        ; Search entries in this sector
+        LDA #<DIR_BUF
+        STA SYMPTR
+        LDA #>DIR_BUF
+        STA SYMPTR+1
+        LDX #0              ; Entry counter (0-15)
+
+SF_DIR_SEARCH:
+        ; Check entry status
+        LDY #0
+        LDA (SYMPTR),Y
+
+        ; Check if unused ($E5) or deleted ($00)
+        CMP #$E5
+        BEQ SF_FOUND_FREE
+        CMP #$00
+        BEQ SF_FOUND_FREE
+
+        ; Check if active ($01) - might be same file to overwrite
+        CMP #$01
+        BNE SF_DIR_NEXT
+
+        ; Active entry - compare filename to see if we should overwrite
+        LDY #0
+SF_CMP_NAME:
+        INY                 ; Start at offset 1 (skip status)
+        LDA (SYMPTR),Y
+        DEY
+        CMP SCRATCH,Y
+        BNE SF_DIR_NEXT
+        INY
+        CPY #11             ; Compare all 11 chars (name + ext)
+        BNE SF_CMP_NAME
+
+        ; Found existing file with same name - overwrite it
+        JMP SF_FOUND_FREE
+
+SF_DIR_NEXT:
+        ; Move to next entry (+32 bytes)
+        CLC
+        LDA SYMPTR
+        ADC #32
+        STA SYMPTR
+        LDA SYMPTR+1
+        ADC #0
+        STA SYMPTR+1
+
+        INX
+        CPX #16             ; 16 entries per sector
+        BNE SF_DIR_SEARCH
+
+        ; Next directory sector
+        INC DIRSEC
+        DEC CHARTMP
+        BNE SF_DIR_SECTOR
+
+        ; No free entry found - print error
+        LDA #<MSG_DIRFULL
+        LDX #>MSG_DIRFULL
+        JSR PRINT_STR
+        SEC
+        RTS
+
+SF_FOUND_FREE:
+        ; SYMPTR points to the directory entry to use
+        ; DIRSEC has the directory sector number
+        ; Now find free sectors for data (search bitmap)
+
+        ; Calculate sectors needed: (FILESIZE + 511) / 512
+        LDA FILESIZE+1      ; High byte
+        LSR A               ; Divide by 2 (gives sectors from high byte)
+        STA LOBYTE          ; Sector count
+        LDA FILESIZE        ; Low byte
+        BEQ SF_CHECK_ODD    ; If low=0, check if high was odd
+        INC LOBYTE          ; Round up for any remainder
+        JMP SF_FIND_SECTOR
+
+SF_CHECK_ODD:
+        LDA FILESIZE+1
+        AND #1              ; Was high byte odd?
+        BEQ SF_MIN_SEC
+        INC LOBYTE
+        JMP SF_FIND_SECTOR
+
+SF_MIN_SEC:
+        ; Ensure at least 1 sector
+        LDA LOBYTE
+        BNE SF_FIND_SECTOR
+        LDA #1
+        STA LOBYTE
+
+SF_FIND_SECTOR:
+        ; Find first free sector in bitmap (starting at sector 20)
+        ; Read bitmap sector 4 (first bitmap sector)
+        LDA #4              ; Bitmap starts at sector 4
+        STA $30
+        LDA #0
+        STA $31
+        LDA #<SCRATCH+16    ; Use scratch+16 as bitmap buffer
+        STA $32
+        LDA #>SCRATCH
+        STA $33
+        JSR DISK_READ
+        BCC SF_BMP_OK
+        JMP SF_WRITE_ERR
+SF_BMP_OK:
+
+        ; Search for free bit starting at sector 20
+        ; Sector 20 is byte 2, bit 4 (20/8=2, 20%8=4)
+        LDY #2              ; Byte index (sector 20 / 8)
+        LDA #$10            ; Bit 4 mask (1 << (20 % 8))
+        STA CHARTMP         ; Current bit mask
+
+SF_BIT_LOOP:
+        LDA SCRATCH+16,Y    ; Get bitmap byte
+        AND CHARTMP         ; Test bit
+        BEQ SF_BIT_FREE     ; Found free sector
+
+        ; Shift mask for next sector
+        ASL CHARTMP
+        BNE SF_BIT_CONT
+        ; Mask wrapped - next byte
+        LDA #1
+        STA CHARTMP
+        INY
+        CPY #64             ; Max 512 sectors in first bitmap sector
+        BCC SF_BIT_LOOP
+
+        ; No free sector found
+        LDA #<MSG_DISKFULL
+        LDX #>MSG_DISKFULL
+        JSR PRINT_STR
+        SEC
+        RTS
+
+SF_BIT_CONT:
+        JMP SF_BIT_LOOP
+
+SF_BIT_FREE:
+        ; Calculate sector number: Y*8 + log2(CHARTMP)
+        ; Y = byte index, CHARTMP = bit mask
+        TYA
+        ASL A
+        ASL A
+        ASL A               ; Y * 8
+        STA FILESEC         ; Base sector
+
+        ; Add bit position
+        LDA CHARTMP
+        LDX #0
+SF_BIT_POS:
+        LSR A
+        BCS SF_GOT_SEC
+        INX
+        JMP SF_BIT_POS
+
+SF_GOT_SEC:
+        TXA
+        CLC
+        ADC FILESEC
+        STA FILESEC         ; Final start sector
+        LDA #0
+        STA FILESEC+1
+
+        ; Mark sectors as used in bitmap
+        LDX LOBYTE          ; Sector count
+        LDY #2              ; Reset to byte 2 (sector 16-23)
+        ; Recalculate position
+        LDA FILESEC
+        LSR A
+        LSR A
+        LSR A               ; Byte index = sector / 8
+        TAY
+        LDA FILESEC
+        AND #7              ; Bit position
+        TAX
+        LDA #1
+SF_SHIFT_MASK:
+        CPX #0
+        BEQ SF_MARK_BITS
+        ASL A
+        DEX
+        JMP SF_SHIFT_MASK
+
+SF_MARK_BITS:
+        STA CHARTMP         ; Bit mask for first sector
+        LDX LOBYTE          ; Sector count
+
+SF_MARK_LOOP:
+        LDA SCRATCH+16,Y
+        ORA CHARTMP
+        STA SCRATCH+16,Y
+
+        DEX
+        BEQ SF_WRITE_BITMAP
+
+        ; Next bit
+        ASL CHARTMP
+        BNE SF_MARK_LOOP
+        ; Next byte
+        LDA #1
+        STA CHARTMP
+        INY
+        JMP SF_MARK_LOOP
+
+SF_WRITE_BITMAP:
+        ; Write bitmap back to disk
+        LDA #4
+        STA $30
+        LDA #0
+        STA $31
+        LDA #<SCRATCH+16
+        STA $32
+        LDA #>SCRATCH
+        STA $33
+        JSR DISK_WRITE
+        BCC SF_BMP_WR_OK
+        JMP SF_WRITE_ERR
+SF_BMP_WR_OK:
+
+        ; Write output data to disk
+        LDA FILESEC
+        STA $30
+        LDA FILESEC+1
+        STA $31
+        LDA #<OUT_BUF
+        STA $32
+        LDA #>OUT_BUF
+        STA $33
+
+        LDX LOBYTE          ; Sector count
+SF_DATA_LOOP:
+        JSR DISK_WRITE
+        BCC SF_DATA_WR_OK
+        JMP SF_WRITE_ERR
+SF_DATA_WR_OK:
+
+        ; Next sector
+        INC $30
+        BNE SF_DATA_NO_CARRY
+        INC $31
+SF_DATA_NO_CARRY:
+
+        ; Advance buffer by 512 bytes
+        CLC
+        LDA $33
+        ADC #2
+        STA $33
+
+        DEX
+        BNE SF_DATA_LOOP
+
+        ; Update directory entry
+        ; SYMPTR still points to the entry
+        LDY #0
+        LDA #1              ; Status = active
+        STA (SYMPTR),Y
+
+        ; Copy filename (11 bytes: 8 name + 3 ext)
+        LDY #0
+SF_COPY_FNAME:
+        LDA SCRATCH,Y
+        INY
+        STA (SYMPTR),Y
+        CPY #11
+        BNE SF_COPY_FNAME
+
+        ; Start sector at offset $0C
+        LDY #$0C
+        LDA FILESEC
+        STA (SYMPTR),Y
+        INY
+        LDA FILESEC+1
+        STA (SYMPTR),Y
+
+        ; File size at offset $0E (4 bytes)
+        LDY #$0E
+        LDA FILESIZE
+        STA (SYMPTR),Y
+        INY
+        LDA FILESIZE+1
+        STA (SYMPTR),Y
+        INY
+        LDA #0
+        STA (SYMPTR),Y
+        INY
+        STA (SYMPTR),Y
+
+        ; Sector count at offset $12
+        LDY #$12
+        LDA LOBYTE
+        STA (SYMPTR),Y
+        INY
+        LDA #0
+        STA (SYMPTR),Y
+
+        ; Attributes at offset $14 (0 = normal file)
+        LDY #$14
+        LDA #0
+        STA (SYMPTR),Y
+
+        ; Parent directory at offset $15-$16 ($FFFF = root)
+        LDY #$15
+        LDA #$FF
+        STA (SYMPTR),Y
+        INY
+        STA (SYMPTR),Y
+
+        ; Write directory sector back
+        LDA DIRSEC
+        STA $30
+        LDA #0
+        STA $31
+        LDA #<DIR_BUF
+        STA $32
+        LDA #>DIR_BUF
+        STA $33
+        JSR DISK_WRITE
+        BCC SF_DIR_WR_OK
+        JMP SF_WRITE_ERR
+SF_DIR_WR_OK:
+
+        ; Print "Saved"
+        LDA #<MSG_SAVED
+        LDX #>MSG_SAVED
+        JSR PRINT_STR
+
+        CLC
+        RTS
+
+SF_WRITE_ERR:
+        LDA #<MSG_WRITEERR
+        LDX #>MSG_WRITEERR
+        JSR PRINT_STR
+        SEC
+        RTS
+
 ; File loading messages
 MSG_USAGE:
         .DB "Usage: ASM <filename>", $0D, $0A, 0
@@ -2181,6 +2701,22 @@ MSG_NOTFOUND:
 
 MSG_READERR:
         .DB "Disk read error", $0D, $0A, 0
+
+; File saving messages
+MSG_SAVING:
+        .DB "Saving ", 0
+
+MSG_SAVED:
+        .DB "Saved", $0D, $0A, 0
+
+MSG_WRITEERR:
+        .DB "Disk write error", $0D, $0A, 0
+
+MSG_DIRFULL:
+        .DB "Directory full", $0D, $0A, 0
+
+MSG_DISKFULL:
+        .DB "Disk full", $0D, $0A, 0
 
 ; End of assembler
         .DB 0

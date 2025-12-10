@@ -170,4 +170,56 @@ describe('Stage 0 Assembler', () => {
       0x60,             // RTS
     ]);
   });
+
+  it('should handle .DW with forward references', () => {
+    // This test verifies that .DW directives with forward label references
+    // are correctly resolved. This was a bug where .DW would emit 0x00 0x00
+    // for forward references because the label resolution happened too early.
+    const result = assemble(`
+      .ORG $1000
+      ; Table of pointers (using forward references)
+      TABLE:
+        .DW DATA_A, DATA_B, DATA_C
+      CODE:
+        LDA TABLE
+        RTS
+      DATA_A: .DB $11
+      DATA_B: .DB $22
+      DATA_C: .DB $33
+    `);
+
+    // TABLE is at $1000, each .DW is 2 bytes, so:
+    // - TABLE+0 ($1000) points to DATA_A
+    // - TABLE+2 ($1002) points to DATA_B
+    // - TABLE+4 ($1004) points to DATA_C
+    // CODE is at $1006 (3 bytes for LDA abs + 1 byte for RTS = 4 bytes)
+    // DATA_A is at $100A
+    // DATA_B is at $100B
+    // DATA_C is at $100C
+
+    const bytes = Array.from(result.bytes);
+
+    // First .DW should be pointer to DATA_A ($100A)
+    expect(bytes[0]).toBe(0x0A);  // Low byte of $100A
+    expect(bytes[1]).toBe(0x10);  // High byte of $100A
+
+    // Second .DW should be pointer to DATA_B ($100B)
+    expect(bytes[2]).toBe(0x0B);  // Low byte of $100B
+    expect(bytes[3]).toBe(0x10);  // High byte of $100B
+
+    // Third .DW should be pointer to DATA_C ($100C)
+    expect(bytes[4]).toBe(0x0C);  // Low byte of $100C
+    expect(bytes[5]).toBe(0x10);  // High byte of $100C
+
+    // CODE follows
+    expect(bytes[6]).toBe(0xAD);  // LDA abs opcode
+    expect(bytes[7]).toBe(0x00);  // Low byte of TABLE ($1000)
+    expect(bytes[8]).toBe(0x10);  // High byte of TABLE ($1000)
+    expect(bytes[9]).toBe(0x60);  // RTS
+
+    // DATA bytes
+    expect(bytes[10]).toBe(0x11); // DATA_A
+    expect(bytes[11]).toBe(0x22); // DATA_B
+    expect(bytes[12]).toBe(0x33); // DATA_C
+  });
 });
