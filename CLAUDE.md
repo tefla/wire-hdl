@@ -1,121 +1,95 @@
-# CLAUDE.md - Wire-HDL Development Guide
+# CLAUDE.md - Wire-HDL Monorepo Development Guide
 
 ## Project Overview
 
-Wire-HDL is a browser-based 6502 microprocessor emulator with a self-hosting operating system called **WireOS**. The project demonstrates a complete computing stack from CPU emulation to operating system.
+Wire-HDL is a **monorepo** containing browser-based CPU emulators with operating systems. Each package is a complete computing stack from CPU emulation to operating system.
 
-**Key Features:**
-- Full 6502 CPU emulator in TypeScript
-- Self-hosting assembler (Stage 0 assembler can assemble its own source)
-- WireOS - minimalist OS with shell, filesystem, graphics, and sound
-- React-based web UI with canvas graphics and Web Audio
-- Persistent storage using browser IndexedDB
+**Packages:**
+- **@wire-hdl/6502** - 6502 emulator with self-hosting assembler and WireOS
+- **@wire-hdl/riscv** - RISC-V RV32I emulator (new)
+
+**Tech Stack:**
+- **Bun** - Runtime and package manager
+- **TypeScript 5.3** - Strict mode enabled
+- **Vite 7.2** - Build tool and dev server
+- **React 19** - UI framework
+- **Vitest 1.0** - Unit testing
+- **Playwright 1.57** - E2E testing (6502 only)
 
 ## Directory Structure
 
 ```
 wire-hdl/
-├── src/
-│   ├── emulator/           # 6502 CPU emulator
-│   │   └── cpu.ts          # Main CPU implementation
-│   ├── assembler/          # Stage 0 assembler and system ROMs
-│   │   ├── stage0.ts       # Assembler (40+ addressing modes)
-│   │   ├── bios.ts         # BIOS ROM with I/O routines
-│   │   └── monitor.ts      # Monitor/debugger ROM
-│   ├── bootstrap/          # Bootstrap loaders
-│   │   ├── hex-loader.ts   # Serial hex loader
-│   │   ├── boot-loader.ts  # Disk boot loader
-│   │   ├── stage0-assembler.ts # Bootstrap assembler generator
-│   │   ├── disk-image.ts   # Floppy disk image creation
-│   │   ├── shell.ts        # WireOS shell
-│   │   ├── asm0.ts         # Assembler module
-│   │   └── edit.ts         # Text editor module
-│   ├── system/             # OS-level components
-│   │   ├── wirefs.ts       # WireFS filesystem (CP/M-like)
-│   │   └── disk.ts         # Disk abstraction layer
-│   ├── web/                # React web application
-│   │   ├── App.tsx         # Main React component
-│   │   ├── Computer.ts     # Emulated computer system
-│   │   ├── Display.tsx     # Canvas graphics display
-│   │   ├── Terminal.tsx    # Text terminal component
-│   │   ├── graphics-card.ts # Graphics emulation
-│   │   ├── sound-chip.ts   # NES-style sound synthesis
-│   │   ├── font.ts         # Built-in font data
-│   │   └── persistent-disk.ts # IndexedDB integration
-│   └── index.ts            # Library exports
-├── tests/
-│   ├── emulator.test.ts    # CPU instruction tests
-│   ├── assembler.test.ts   # Assembler syntax tests
-│   ├── bootstrap.test.ts   # Loader tests
-│   ├── shell.test.ts       # Shell command tests
-│   ├── wirefs.test.ts      # Filesystem tests
-│   └── e2e/
-│       └── computer.spec.ts # Playwright browser tests
-├── asm/                    # Assembly source files
-│   ├── hello.asm           # Hello World example
-│   ├── shell.asm           # WireOS shell
-│   ├── asm.asm             # Self-hosted assembler
-│   ├── edit.asm            # Text editor
-│   └── ...                 # Other programs
+├── packages/
+│   ├── wire-6502/              # 6502 emulator package
+│   │   ├── src/
+│   │   │   ├── emulator/       # 6502 CPU emulator
+│   │   │   ├── assembler/      # Stage 0 assembler and ROMs
+│   │   │   ├── bootstrap/      # Bootstrap loaders
+│   │   │   ├── system/         # OS-level components (WireFS)
+│   │   │   └── web/            # React web application
+│   │   ├── tests/              # Unit and E2E tests
+│   │   ├── asm/                # Assembly source files
+│   │   └── backlog/            # Project task tracking
+│   │
+│   └── wire-riscv/             # RISC-V emulator package
+│       ├── src/
+│       │   ├── emulator/       # RV32I CPU emulator
+│       │   └── web/            # React web application
+│       └── tests/              # Unit tests
+│
+├── package.json                # Workspace root
+├── tsconfig.json               # TypeScript project references
 └── .github/workflows/
-    └── pages.yml           # GitHub Pages deployment
+    └── pages.yml               # GitHub Pages deployment
 ```
-
-## Tech Stack
-
-- **TypeScript 5.3** - Strict mode enabled
-- **Vite 7.2** - Build tool and dev server
-- **React 19** - UI framework
-- **Vitest 1.0** - Unit testing
-- **Playwright 1.57** - E2E testing
-- **ES2022** - Target JavaScript version
 
 ## Development Commands
 
+### Root Level (all packages)
 ```bash
-# Start development server (localhost:5173)
-npm run dev
+# Install dependencies
+bun install
 
-# Build TypeScript library to dist/
-npm run build
+# Run all tests
+bun run test:run
 
-# Build web app to dist-web/
-npm run build:web
-
-# Run unit tests (watch mode)
-npm test
-
-# Run unit tests once (CI mode)
-npm run test:run
-
-# Run E2E browser tests
-npm run test:e2e
-
-# Debug E2E tests with visible browser
-npm run test:e2e:debug
+# Build all packages
+bun run build
 ```
 
-## Testing
+### Package-specific
+```bash
+# 6502 package
+bun run 6502:dev          # Start dev server
+bun run 6502:test         # Run tests (watch mode)
+bun run 6502:test:run     # Run tests once
+bun run 6502:build:web    # Build web app
 
-### Unit Tests (Vitest)
-Located in `tests/*.test.ts`. Run with `npm test`.
+# RISC-V package
+bun run riscv:dev         # Start dev server
+bun run riscv:test        # Run tests (watch mode)
+bun run riscv:test:run    # Run tests once
+bun run riscv:build:web   # Build web app
+```
 
-Test files:
-- `emulator.test.ts` - CPU instruction execution, flags, addressing modes
-- `assembler.test.ts` - Assembly parsing, label resolution, codegen
-- `bootstrap.test.ts` - Hex loader, boot loader functionality
-- `wirefs.test.ts` - Filesystem operations
-- `shell.test.ts` - Shell commands
+### Direct package commands
+```bash
+cd packages/wire-6502 && bun run dev
+cd packages/wire-riscv && bun run dev
+```
 
-### E2E Tests (Playwright)
-Located in `tests/e2e/*.spec.ts`. Run with `npm run test:e2e`.
+---
 
-Tests full browser interaction: page load, CPU state, terminal I/O, boot sequence.
+## Wire-6502 Package
 
-**Note:** Vitest is configured to exclude e2e tests (`**/*.spec.ts`).
+### Features
+- Full 6502 CPU emulator in TypeScript
+- Self-hosting assembler (Stage 0 assembler can assemble its own source)
+- WireOS - minimalist OS with shell, filesystem, graphics, and sound
+- Persistent storage using browser IndexedDB
 
-## Memory Map
-
+### Memory Map
 ```
 $0000-$00FF  Zero page (fast access)
 $0100-$01FF  Stack
@@ -123,9 +97,6 @@ $0200-$7FFF  RAM (user program area)
 $8000-$80FF  I/O Registers
 $8100-$8FFF  VRAM (4KB)
 $C000-$FFFF  ROM (16KB)
-  $F000      BIOS entry points
-  $F800      Hex loader
-  $FFFC      Reset vector
 ```
 
 ### I/O Register Map
@@ -138,54 +109,49 @@ $C000-$FFFF  ROM (16KB)
 | $8050-$8061 | VIDEO | Graphics card |
 | $8070-$8080 | SOUND | Sound chip |
 
-## Architecture
+### Key Files
+- `src/emulator/cpu.ts` - 6502 CPU implementation
+- `src/assembler/stage0.ts` - Assembler with 40+ addressing modes
+- `src/system/wirefs.ts` - CP/M-like filesystem
+- `src/web/graphics-card.ts` - 80x25 text / 160x100 graphics
+- `src/web/sound-chip.ts` - NES-style APU (4 channels)
 
-### CPU Emulator (`src/emulator/cpu.ts`)
-- Full 6502 instruction set
-- All addressing modes: immediate, absolute, zero-page, indexed, indirect
-- Status flags: C, Z, N, V, I, D, B
-- IRQ and NMI interrupt support
+---
 
-### Assembler (`src/assembler/stage0.ts`)
-- Comprehensive opcode table
-- Label support with symbol resolution
-- Addressing mode syntax:
-  - Immediate: `LDA #$42`
-  - Absolute: `STA $1234`
-  - Zero-page: `LDA $50`
-  - Indexed: `LDA $80,X`
-  - Indirect: `JMP ($1234)`
+## Wire-RISCV Package
 
-### WireFS (`src/system/wirefs.ts`)
-- CP/M-like design with 8.3 filenames
-- 512-byte sectors
-- Allocation bitmap for free space
-- Directory entries with attributes (read-only, hidden, system, directory)
-- Hierarchical directory support
+### Features
+- RISC-V RV32I base integer instruction set emulator
+- All base instructions: LUI, AUIPC, JAL, JALR, branches, loads, stores, ALU ops
+- 32 general-purpose registers (x0 hardwired to 0)
+- React-based web UI
 
-### Graphics Card (`src/web/graphics-card.ts`)
-- 80x25 character text mode
-- 160x100 pixel graphics mode
-- 16-color CGA palette
-- VRAM mapped at $8100
+### Memory Map
+```
+$0000-$FFFF  RAM (64KB default, configurable)
+```
 
-### Sound Chip (`src/web/sound-chip.ts`)
-- NES-style APU (4 channels)
-- 2x Pulse wave, 1x Triangle, 1x Noise
-- Web Audio API synthesis
+### Instruction Support
+- **U-type**: LUI, AUIPC
+- **J-type**: JAL
+- **I-type**: JALR, loads (LB, LH, LW, LBU, LHU), ALU-immediate
+- **S-type**: stores (SB, SH, SW)
+- **B-type**: branches (BEQ, BNE, BLT, BGE, BLTU, BGEU)
+- **R-type**: ALU (ADD, SUB, AND, OR, XOR, SLL, SRL, SRA, SLT, SLTU)
+- **System**: ECALL, EBREAK, FENCE
+
+### Key Files
+- `src/emulator/cpu.ts` - RV32I CPU implementation
+- `src/web/App.tsx` - React application
+
+---
 
 ## Code Conventions
 
 ### TypeScript
 - Strict mode enabled - no implicit any
 - No unused locals or parameters
-- Explicit return types on functions
 - Use ES modules (`.js` extension in imports for compiled output)
-
-### File Organization
-- One module per file
-- Export types and constants alongside implementations
-- Group related functionality in directories
 
 ### Naming
 - `SCREAMING_CASE` for constants (addresses, opcodes)
@@ -199,47 +165,13 @@ $C000-$FFFF  ROM (16KB)
 - Comments with `;`
 - Use `ORG` directive for origin address
 
-## Key Patterns
-
-### Adding CPU Instructions
-Edit `src/emulator/cpu.ts`. Each instruction is a case in the execute switch with opcode handling.
-
-### Adding Assembler Opcodes
-Edit `src/assembler/stage0.ts` OPCODES table. Format: `[mnemonic]: { [addressingMode]: opcode }`.
-
-### Adding Shell Commands
-Edit `src/bootstrap/shell.ts`. Commands are matched in the shell's command parser.
-
-### Adding I/O Devices
-1. Define register addresses in appropriate source
-2. Add memory-mapped I/O handling in Computer.ts
-3. Create device class in `src/web/`
-
-## Build Configuration
-
-### TypeScript (`tsconfig.json`)
-- Target: ES2022
-- Module: ESNext
-- Strict checks enabled
-- Source maps and declaration maps generated
-
-### Vite (`vite.config.ts`)
-- React plugin for JSX
-- Output to `dist-web/`
-- Base path configurable via `VITE_BASE` env var
-
-### GitHub Actions
-Deploys to GitHub Pages on push to master:
-- Builds with `VITE_BASE=/wire-hdl/`
-- Uses Node.js 22
-
 ## Debugging Tips
 
-1. **CPU Issues**: Check status flags (P register) and watch for incorrect branch behavior
+1. **CPU Issues**: Check status flags and watch for incorrect branch behavior
 2. **Assembler Issues**: Verify label resolution and addressing mode detection
-3. **I/O Issues**: Check memory-mapped register addresses in Computer.ts
+3. **I/O Issues**: Check memory-mapped register addresses
 4. **E2E Failures**: Screenshots captured on failure in playwright-report/
-5. **Failing Tests**: When writing tests that fail, consider that the implementation itself may be buggy. Tests can expose real bugs in the codebase, not just test errors.
+5. **Failing Tests**: Tests can expose real bugs in the codebase
 
 <!-- BACKLOG.MD MCP GUIDELINES START -->
 

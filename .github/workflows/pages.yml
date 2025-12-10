@@ -21,24 +21,68 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-          cache: npm
+          bun-version: latest
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install
 
-      - name: Build
+      - name: Run tests
+        run: |
+          cd packages/wire-6502 && bun run test:run
+          cd ../wire-riscv && bun run test:run
+
+      - name: Build 6502 web app
         env:
-          VITE_BASE: /wire-hdl/
-        run: npm run build:web
+          VITE_BASE: /wire-hdl/6502/
+        run: cd packages/wire-6502 && bun run build:web
+
+      - name: Build RISC-V web app
+        env:
+          VITE_BASE: /wire-hdl/riscv/
+        run: cd packages/wire-riscv && bun run build:web
+
+      - name: Prepare combined output
+        run: |
+          mkdir -p dist-combined
+          cp -r packages/wire-6502/dist-web dist-combined/6502
+          cp -r packages/wire-riscv/dist-web dist-combined/riscv
+          cat > dist-combined/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <title>Wire-HDL - CPU Emulators</title>
+            <style>
+              body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #0a0a0a; color: #fff; }
+              h1 { color: #4af; }
+              a { color: #4af; text-decoration: none; }
+              a:hover { text-decoration: underline; }
+              .project { margin: 20px 0; padding: 20px; background: #1a1a1a; border-radius: 8px; }
+              .project h2 { margin-top: 0; }
+            </style>
+          </head>
+          <body>
+            <h1>Wire-HDL</h1>
+            <p>CPU emulators with operating systems</p>
+            <div class="project">
+              <h2><a href="6502/">Wire-6502</a></h2>
+              <p>6502 emulator with self-hosting assembler and WireOS</p>
+            </div>
+            <div class="project">
+              <h2><a href="riscv/">Wire-RISCV</a></h2>
+              <p>RISC-V RV32I emulator</p>
+            </div>
+          </body>
+          </html>
+          EOF
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist-web
+          path: dist-combined
 
   deploy:
     needs: build

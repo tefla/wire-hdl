@@ -1,4 +1,14 @@
 node_modules/
 dist/
+dist-web/
 *.log
 .DS_Store
+
+# Editor
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+playwright-report/
+test-results/
