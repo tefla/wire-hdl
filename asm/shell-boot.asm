@@ -1349,8 +1349,21 @@ RUN_SEARCH:
     LDY #$00
     LDA ($34),Y
     CMP #$01
-    BEQ RUN_ENTRY_OK
+    BEQ RUN_CHK_PARENT
     JMP RUN_NEXT_ENTRY  ; Trampoline for inactive entry
+RUN_CHK_PARENT:
+    ; Check parent directory matches current directory
+    LDY #$15
+    LDA ($34),Y
+    CMP CUR_DIR_LO
+    BEQ RUN_CHK_PAR_HI
+    JMP RUN_NEXT_ENTRY
+RUN_CHK_PAR_HI:
+    INY
+    LDA ($34),Y
+    CMP CUR_DIR_HI
+    BEQ RUN_ENTRY_OK
+    JMP RUN_NEXT_ENTRY
 RUN_ENTRY_OK:
     ; Compare filename with command buffer
     ; Command is at $0300, filename at ($34)+1
