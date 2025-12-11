@@ -1,7 +1,7 @@
 ---
 id: task-9.2
 title: 'Integration: Add Screen component to React UI'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 14:00'
 labels:
