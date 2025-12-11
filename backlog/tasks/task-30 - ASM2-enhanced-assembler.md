@@ -1,7 +1,7 @@
 ---
 id: task-30
 title: ASM2 - Enhanced assembler with macros and expressions
-status: In Progress
+status: Done
 assignee: []
 created_date: '2025-12-11 14:25'
 labels:
@@ -41,22 +41,22 @@ Create ASM2, an enhanced assembler that extends the basic ASM.BIN with advanced 
 
 ## Subtasks
 
-- [ ] task-30.1: Implement constants (EQU directive)
-- [ ] task-30.2: Implement data directives (.byte, .word, .string)
-- [ ] task-30.3: Implement better error messages with line numbers
-- [ ] task-30.4: Implement macro system (.macro/.endmacro)
-- [ ] task-30.5: Implement expression evaluation in operands
+- [x] task-30.1: Implement constants (EQU directive)
+- [x] task-30.2: Implement data directives (.byte, .word, .string)
+- [x] task-30.3: Implement better error messages with line numbers
+- [x] task-30.4: Implement macro system (.macro/.endmacro)
+- [x] task-30.5: Implement expression evaluation in operands
 
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE_CRITERIA:BEGIN -->
-- [ ] EQU directive defines named constants
-- [ ] Constants can be used in place of numeric values
-- [ ] .byte/.word/.string directives work correctly
-- [ ] Error messages include line numbers and context
-- [ ] Macros can be defined and invoked
-- [ ] Macro parameters are substituted correctly
-- [ ] Expressions with +, -, *, / work in operands
-- [ ] Can write and assemble complex programs using all features
-- [ ] 15+ tests for new features
+- [x] EQU directive defines named constants
+- [x] Constants can be used in place of numeric values
+- [x] .byte/.word/.string directives work correctly
+- [x] Error messages include line numbers and context
+- [x] Macros can be defined and invoked
+- [x] Macro parameters are substituted correctly
+- [x] Expressions with +, -, *, / work in operands
+- [x] Can write and assemble complex programs using all features
+- [x] 15+ tests for new features
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->
