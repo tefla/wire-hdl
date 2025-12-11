@@ -11,6 +11,7 @@ import { StorageController, STORAGE_BASE } from './storage-controller.js';
 import { HardDiskDrive } from './hdd.js';
 import { CDROMDrive } from './cdrom.js';
 import { USBDrive } from './usb.js';
+import { KeyboardController, KEYBOARD_BASE } from './keyboard.js';
 
 // Instruction format opcodes
 export const OPCODE = {
@@ -116,6 +117,7 @@ export class RiscVCpu {
   public cycles: number = 0;
   public gpu: GraphicsCard;
   public storage: StorageController;
+  public keyboard: KeyboardController;
 
   constructor(config: RiscVConfig = {}) {
     const memorySize = config.memorySize ?? 64 * 1024; // 64KB default
@@ -129,6 +131,9 @@ export class RiscVCpu {
     const cdrom = new CDROMDrive();
     const usb = new USBDrive();
     this.storage = new StorageController(hdd, cdrom, usb);
+
+    // Initialize keyboard controller
+    this.keyboard = new KeyboardController();
   }
 
   /**
@@ -176,6 +181,10 @@ export class RiscVCpu {
     if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
       return this.storage.mmioRead(address);
     }
+    // Route to keyboard if address is in keyboard range
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      return this.keyboard.mmioRead(address);
+    }
     return (
       (this.memory[address] |
         (this.memory[address + 1] << 8) |
@@ -197,6 +206,10 @@ export class RiscVCpu {
     if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
       return this.storage.mmioReadHalfword(address);
     }
+    // Route to keyboard if address is in keyboard range
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      return this.keyboard.mmioReadHalfword(address);
+    }
     return this.memory[address] | (this.memory[address + 1] << 8);
   }
 
@@ -211,6 +224,10 @@ export class RiscVCpu {
     // Route to storage if address is in storage range
     if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
       return this.storage.mmioReadByte(address);
+    }
+    // Route to keyboard if address is in keyboard range
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      return this.keyboard.mmioReadByte(address);
     }
     return this.memory[address];
   }
@@ -227,6 +244,11 @@ export class RiscVCpu {
     // Route to storage if address is in storage range
     if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
       this.storage.mmioWrite(address, value);
+      return;
+    }
+    // Route to keyboard if address is in keyboard range (read-only, but route anyway)
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      this.keyboard.mmioWrite(address, value);
       return;
     }
     this.memory[address] = value & 0xff;
@@ -249,6 +271,11 @@ export class RiscVCpu {
       this.storage.mmioWriteHalfword(address, value);
       return;
     }
+    // Route to keyboard if address is in keyboard range (read-only, but route anyway)
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      this.keyboard.mmioWriteHalfword(address, value);
+      return;
+    }
     this.memory[address] = value & 0xff;
     this.memory[address + 1] = (value >> 8) & 0xff;
   }
@@ -267,6 +294,11 @@ export class RiscVCpu {
       this.storage.mmioWriteByte(address, value);
       return;
     }
+    // Route to keyboard if address is in keyboard range (read-only, but route anyway)
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      this.keyboard.mmioWriteByte(address, value);
+      return;
+    }
     this.memory[address] = value & 0xff;
   }
 
@@ -275,6 +307,13 @@ export class RiscVCpu {
    */
   getReg(index: number): number {
     return index === 0 ? 0 : this.x[index];
+  }
+
+  /**
+   * Get register value (alias for getReg)
+   */
+  getRegister(index: number): number {
+    return this.getReg(index);
   }
 
   /**

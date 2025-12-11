@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { RiscVCpu } from '../emulator/cpu.js';
 import { Screen } from './Screen.js';
+import { KeyModifier } from '../emulator/keyboard.js';
 
 export function App() {
   const [cpu] = useState(() => new RiscVCpu({ memorySize: 64 * 1024 }));
@@ -10,10 +11,64 @@ export function App() {
   const [program, setProgram] = useState<string>('');
   const [scale, setScale] = useState<1 | 2 | 3>(1);
   const [, forceUpdate] = useState({});
+  const [keyboardFocused, setKeyboardFocused] = useState(false);
+  const screenContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     updateState();
   }, []);
+
+  // Keyboard event handling
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Update modifier state
+      if (e.shiftKey) cpu.keyboard.setModifier(KeyModifier.SHIFT, true);
+      if (e.ctrlKey) cpu.keyboard.setModifier(KeyModifier.CTRL, true);
+      if (e.altKey) cpu.keyboard.setModifier(KeyModifier.ALT, true);
+
+      // Map key to ASCII
+      let ascii: number | null = null;
+
+      // Handle special keys
+      if (e.key === 'Enter') {
+        ascii = 0x0D;
+      } else if (e.key === 'Backspace') {
+        ascii = 0x08;
+        e.preventDefault(); // Prevent browser back navigation
+      } else if (e.key === 'Escape') {
+        ascii = 0x1B;
+      } else if (e.key === 'Tab') {
+        ascii = 0x09;
+        e.preventDefault(); // Prevent focus change
+      } else if (e.key.length === 1) {
+        // Regular printable character
+        ascii = e.key.charCodeAt(0);
+      }
+
+      if (ascii !== null) {
+        cpu.keyboard.keyPress(ascii);
+        setOutput(`Key pressed: ${e.key} (0x${ascii.toString(16).padStart(2, '0')})`);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      // Update modifier state
+      if (!e.shiftKey) cpu.keyboard.setModifier(KeyModifier.SHIFT, false);
+      if (!e.ctrlKey) cpu.keyboard.setModifier(KeyModifier.CTRL, false);
+      if (!e.altKey) cpu.keyboard.setModifier(KeyModifier.ALT, false);
+    };
+
+    // Only listen for keyboard events when focused on the screen
+    const container = screenContainerRef.current;
+    if (container && keyboardFocused) {
+      container.addEventListener('keydown', handleKeyDown);
+      container.addEventListener('keyup', handleKeyUp);
+      return () => {
+        container.removeEventListener('keydown', handleKeyDown);
+        container.removeEventListener('keyup', handleKeyUp);
+      };
+    }
+  }, [cpu, keyboardFocused]);
 
   const updateState = () => {
     setPc(cpu.pc);
@@ -156,15 +211,26 @@ export function App() {
       {/* Main content: Screen + Registers */}
       <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
         {/* Screen */}
-        <div style={{ flexShrink: 0 }}>
-          <h3 style={{ margin: '0 0 10px 0' }}>Screen</h3>
+        <div
+          ref={screenContainerRef}
+          tabIndex={0}
+          onFocus={() => setKeyboardFocused(true)}
+          onBlur={() => setKeyboardFocused(false)}
+          style={{ flexShrink: 0, outline: keyboardFocused ? '2px solid #4a9eff' : 'none' }}
+        >
+          <h3 style={{ margin: '0 0 10px 0' }}>
+            Screen {keyboardFocused && <span style={{ color: '#4a9eff', fontSize: '12px' }}>(keyboard active)</span>}
+          </h3>
           <Screen
             gpu={cpu.gpu}
             scale={scale}
             showCursor={true}
             cursorBlink={true}
-            style={{ border: '2px solid #333' }}
+            style={{ border: '2px solid #333', cursor: 'text' }}
           />
+          <p style={{ fontSize: '11px', color: '#666', margin: '5px 0 0 0' }}>
+            Click screen to enable keyboard input
+          </p>
         </div>
 
         {/* Registers */}
@@ -230,8 +296,9 @@ export function App() {
 
       <div style={{ marginTop: '20px', color: '#666', fontSize: '12px' }}>
         <p>
-          RV32I emulator with memory-mapped graphics. Click &quot;Load Hello&quot; and &quot;Run&quot; to see text output.
-          Graphics memory is at 0x10000000+. Text VRAM starts at 0x10001000 (80x25 chars, 2 bytes each: char + attr).
+          RV32I emulator with memory-mapped graphics and keyboard. Click &quot;Load Hello&quot; and &quot;Run&quot; to see text output.
+          Graphics at 0x10000000+, Text VRAM at 0x10001000 (80x25), Keyboard at 0x30000000 (STATUS/DATA/MODIFIER).
+          Click the screen to enable keyboard input.
         </p>
       </div>
     </div>
