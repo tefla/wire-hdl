@@ -1,5 +1,5 @@
 ---
-id: riscv-18
+id: task-27
 title: Self-hosting assembler
 status: To Do
 assignee: []
@@ -9,8 +9,8 @@ labels:
   - assembler
   - self-hosting
 dependencies:
-  - riscv-16
-  - riscv-17
+  - task-25
+  - task-26
 priority: low
 ---
 
@@ -46,10 +46,10 @@ Port the RISC-V assembler to run natively on the RISC-V emulator, enabling self-
 
 ## Subtasks
 
-- [ ] riscv-18.1: Design minimal assembler subset for Stage 1
-- [ ] riscv-18.2: Implement Stage 1 assembler in RISC-V assembly
-- [ ] riscv-18.3: Implement Stage 2 assembler with full features
-- [ ] riscv-18.4: Verify self-hosting (Stage 2 assembles itself)
+- [ ] task-27.1: Design minimal assembler subset for Stage 1
+- [ ] task-27.2: Implement Stage 1 assembler in RISC-V assembly
+- [ ] task-27.3: Implement Stage 2 assembler with full features
+- [ ] task-27.4: Verify self-hosting (Stage 2 assembles itself)
 
 ## Acceptance Criteria
 

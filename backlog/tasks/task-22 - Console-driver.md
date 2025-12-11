@@ -1,5 +1,5 @@
 ---
-id: riscv-13
+id: task-22
 title: Console driver
 status: To Do
 assignee: []
@@ -9,7 +9,7 @@ labels:
   - console
   - driver
 dependencies:
-  - riscv-12
+  - task-21
 priority: high
 ---
 
@@ -40,10 +40,10 @@ Implement a console driver that provides terminal-like functionality on top of t
 
 ## Subtasks
 
-- [ ] riscv-13.1: Implement putchar with cursor advance and scroll
-- [ ] riscv-13.2: Implement newline and carriage return handling
-- [ ] riscv-13.3: Implement backspace handling
-- [ ] riscv-13.4: Implement line input (getline syscall)
+- [ ] task-22.1: Implement putchar with cursor advance and scroll
+- [ ] task-22.2: Implement newline and carriage return handling
+- [ ] task-22.3: Implement backspace handling
+- [ ] task-22.4: Implement line input (getline syscall)
 
 ## Acceptance Criteria
 

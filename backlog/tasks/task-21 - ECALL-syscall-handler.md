@@ -1,5 +1,5 @@
 ---
-id: riscv-12
+id: task-21
 title: ECALL syscall handler
 status: To Do
 assignee: []
@@ -9,7 +9,7 @@ labels:
   - syscall
   - os
 dependencies:
-  - riscv-11
+  - task-20
 priority: high
 ---
 
@@ -42,9 +42,9 @@ Implement system call handling via ECALL instruction. Currently ECALL halts the 
 
 ## Subtasks
 
-- [ ] riscv-12.1: Implement syscall dispatcher in CPU
-- [ ] riscv-12.2: Implement console syscalls (putchar, getchar, puts)
-- [ ] riscv-12.3: Implement disk syscalls (read_sector, write_sector)
+- [ ] task-21.1: Implement syscall dispatcher in CPU
+- [ ] task-21.2: Implement console syscalls (putchar, getchar, puts)
+- [ ] task-21.3: Implement disk syscalls (read_sector, write_sector)
 
 ## Acceptance Criteria
 

@@ -1,5 +1,5 @@
 ---
-id: riscv-15
+id: task-24
 title: Program loader
 status: To Do
 assignee: []
@@ -9,7 +9,7 @@ labels:
   - loader
   - executable
 dependencies:
-  - riscv-14
+  - task-23
 priority: medium
 ---
 
@@ -48,9 +48,9 @@ Offset  Size  Description
 
 ## Subtasks
 
-- [ ] riscv-15.1: Define executable format and header structure
-- [ ] riscv-15.2: Implement loader in shell/OS
-- [ ] riscv-15.3: Create tool to build executable images
+- [ ] task-24.1: Define executable format and header structure
+- [ ] task-24.2: Implement loader in shell/OS
+- [ ] task-24.3: Create tool to build executable images
 
 ## Acceptance Criteria
 

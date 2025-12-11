@@ -1,5 +1,5 @@
 ---
-id: riscv-14
+id: task-23
 title: Simple bootloader
 status: To Do
 assignee: []
@@ -9,7 +9,7 @@ labels:
   - boot
   - loader
 dependencies:
-  - riscv-12
+  - task-21
 priority: medium
 ---
 

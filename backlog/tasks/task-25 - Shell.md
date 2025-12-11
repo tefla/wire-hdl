@@ -1,5 +1,5 @@
 ---
-id: riscv-16
+id: task-25
 title: Shell program
 status: To Do
 assignee: []
@@ -9,8 +9,8 @@ labels:
   - shell
   - os
 dependencies:
-  - riscv-13
-  - riscv-15
+  - task-22
+  - task-24
 priority: medium
 ---
 
@@ -54,10 +54,10 @@ loop:
 
 ## Subtasks
 
-- [ ] riscv-16.1: Implement command parser
-- [ ] riscv-16.2: Implement built-in commands
-- [ ] riscv-16.3: Implement external program execution
-- [ ] riscv-16.4: Write shell in RISC-V assembly
+- [ ] task-25.1: Implement command parser
+- [ ] task-25.2: Implement built-in commands
+- [ ] task-25.3: Implement external program execution
+- [ ] task-25.4: Write shell in RISC-V assembly
 
 ## Acceptance Criteria
 

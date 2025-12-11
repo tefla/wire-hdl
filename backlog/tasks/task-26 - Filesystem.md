@@ -1,5 +1,5 @@
 ---
-id: riscv-17
+id: task-26
 title: Simple filesystem
 status: To Do
 assignee: []
@@ -9,7 +9,7 @@ labels:
   - filesystem
   - storage
 dependencies:
-  - riscv-16
+  - task-25
 priority: low
 ---
 
@@ -51,10 +51,10 @@ Offset  Size  Description
 
 ## Subtasks
 
-- [ ] riscv-17.1: Design filesystem layout
-- [ ] riscv-17.2: Implement filesystem driver
-- [ ] riscv-17.3: Implement file operations (open, read, write, close)
-- [ ] riscv-17.4: Create disk image tool
+- [ ] task-26.1: Design filesystem layout
+- [ ] task-26.2: Implement filesystem driver
+- [ ] task-26.3: Implement file operations (open, read, write, close)
+- [ ] task-26.4: Create disk image tool
 
 ## Acceptance Criteria
 

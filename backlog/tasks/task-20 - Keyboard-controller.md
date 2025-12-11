@@ -1,5 +1,5 @@
 ---
-id: riscv-11
+id: task-20
 title: Keyboard controller and CPU integration
 status: To Do
 assignee: []
@@ -35,9 +35,9 @@ Implement a memory-mapped keyboard controller that allows programs to read keybo
 
 ## Subtasks
 
-- [ ] riscv-11.1: Implement KeyboardController class
-- [ ] riscv-11.2: Wire keyboard to CPU memory bus
-- [ ] riscv-11.3: Connect browser keyboard events to controller
+- [ ] task-20.1: Implement KeyboardController class
+- [ ] task-20.2: Wire keyboard to CPU memory bus
+- [ ] task-20.3: Connect browser keyboard events to controller
 
 ## Acceptance Criteria
 
