@@ -40,15 +40,20 @@ describe('BootDisk', () => {
     });
   });
 
-  describe('built-in commands', () => {
+  describe('native commands', () => {
     it('should have shell executable', () => {
       const disk = bootDisk.create();
       const fs = new WireFS(disk);
 
-      // Shell is the only executable on disk
-      // cat, ls, asm are shell built-ins (no .BIN files)
       const shell = fs.readFile('SHELL', 'BIN');
       expect(shell).not.toBeNull();
+    });
+
+    it('should have native echo command', () => {
+      const disk = bootDisk.create();
+      const fs = new WireFS(disk);
+
+      expect(fs.fileExists('ECHO', 'BIN')).toBe(true);
     });
   });
 
@@ -327,6 +332,22 @@ describe('InteractiveSystem', () => {
 
       expect(fs).not.toBeNull();
       expect(fs!.isFormatted()).toBe(true);
+    });
+  });
+
+  describe('native command execution', () => {
+    beforeEach(() => {
+      system.boot();
+      system.tick(5000);
+    });
+
+    it('should run native echo command', () => {
+      typeString(system, 'run ECHO.BIN\r');
+      system.tick(1000);
+
+      // Check console output instead of screen text
+      const output = cpu.consoleOutput;
+      expect(output).toContain('Hello from native echo!');
     });
   });
 });

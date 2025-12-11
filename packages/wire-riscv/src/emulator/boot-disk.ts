@@ -45,8 +45,8 @@ export class BootDisk {
     // Add shell program
     this.addShell();
 
-    // Note: cat, ls, asm commands are implemented as shell built-ins
-    // in InteractiveSystem for now. Native RISC-V versions planned for future.
+    // Add native command programs
+    this.addNativeCommands();
 
     // Add sample files
     this.addSampleFiles();
@@ -96,6 +96,41 @@ loop:   ADDI t0, zero, 0
     return code;
   }
 
+  /**
+   * Add native command programs to disk
+   */
+  private addNativeCommands(): void {
+    const asm = new NativeAssembler();
+
+    // ECHO command - prints "Hello from native echo!"
+    // The message will be in the data section
+    // Code is 9 instructions (36 bytes = 0x24), so data is at 0x1000 + 0x24 = 0x1024
+    const echoCode = asm.assemble(`
+; ECHO - native echo command
+; Prints hardcoded message from data section
+
+        LUI a0, 0x1         ; Base address 0x1000
+        ADDI a0, a0, 0x24   ; Add offset to data (36 bytes of code)
+        ADDI a7, zero, 3    ; PUTS syscall
+        ECALL
+
+        ADDI a0, zero, 10   ; Print newline
+        ADDI a7, zero, 1    ; PUTCHAR syscall
+        ECALL
+
+        ADDI a7, zero, 0    ; EXIT syscall
+        ECALL
+`);
+
+    const echoMsg = new TextEncoder().encode('Hello from native echo!\0');
+    const echoExe = new ExecutableBuilder()
+      .setCode(echoCode)
+      .setData(echoMsg)
+      .setStackSize(256)
+      .build();
+    this.fs.createFile('ECHO', 'BIN');
+    this.fs.writeFile('ECHO', 'BIN', echoExe);
+  }
 
   /**
    * Add sample files to disk
@@ -157,6 +192,9 @@ export class InteractiveSystem {
 
     // Initialize filesystem from disk
     this.fs = new WireFS(diskImage);
+
+    // Attach filesystem to CPU for syscalls
+    this.cpu.filesystem = this.fs;
 
     // Create shell
     this.shell = new Shell(this.cpu);

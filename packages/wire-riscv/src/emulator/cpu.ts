@@ -12,6 +12,16 @@ import { HardDiskDrive } from './hdd.js';
 import { CDROMDrive } from './cdrom.js';
 import { USBDrive } from './usb.js';
 import { KeyboardController, KEYBOARD_BASE } from './keyboard.js';
+import { WireFS } from './filesystem.js';
+
+/** File handle for syscall file operations */
+interface FileHandle {
+  name: string;
+  extension: string;
+  data: Uint8Array;
+  cursor: number;
+  mode: 'r' | 'w';
+}
 
 // Instruction format opcodes
 export const OPCODE = {
@@ -118,6 +128,11 @@ export const SYSCALL = {
   READ_SECTOR: 4,
   WRITE_SECTOR: 5,
   GETLINE: 6,
+  FOPEN: 7,
+  FREAD: 8,
+  FWRITE: 9,
+  FCLOSE: 10,
+  READDIR: 11,
 } as const;
 
 export class RiscVCpu {
@@ -129,10 +144,15 @@ export class RiscVCpu {
   public gpu: GraphicsCard;
   public storage: StorageController;
   public keyboard: KeyboardController;
+  public filesystem: WireFS | null = null;
 
   // Syscall-related state
   public exitCode: number = 0;
   public consoleOutput: string = '';
+  private fileHandles: Map<number, FileHandle> = new Map();
+  private nextFileHandle: number = 1;
+  private dirIterator: number = 0;
+  private dirFileList: Array<{name: string, extension: string, size: number}> | null = null;
 
   constructor(config: RiscVConfig = {}) {
     const memorySize = config.memorySize ?? 64 * 1024; // 64KB default
@@ -778,6 +798,31 @@ export class RiscVCpu {
         this.setReg(10, this.syscallGetline(a0, a1));
         return true;
 
+      case SYSCALL.FOPEN:
+        // Open file: a0=filename address, a1=mode (0=read, 1=write)
+        this.setReg(10, this.syscallFopen(a0, a1));
+        return true;
+
+      case SYSCALL.FREAD:
+        // Read from file: a0=handle, a1=buffer, a2=count
+        this.setReg(10, this.syscallFread(a0, a1, this.getReg(12)));
+        return true;
+
+      case SYSCALL.FWRITE:
+        // Write to file: a0=handle, a1=buffer, a2=count
+        this.setReg(10, this.syscallFwrite(a0, a1, this.getReg(12)));
+        return true;
+
+      case SYSCALL.FCLOSE:
+        // Close file: a0=handle
+        this.setReg(10, this.syscallFclose(a0));
+        return true;
+
+      case SYSCALL.READDIR:
+        // Read directory: a0=buffer for name, a1=buffer for ext, a2=buffer for size
+        this.setReg(10, this.syscallReaddir(a0, a1, this.getReg(12)));
+        return true;
+
       default:
         // Unknown syscall - return -1
         this.setReg(10, 0xFFFFFFFF);
@@ -977,5 +1022,164 @@ export class RiscVCpu {
     this.writeByte(buffer + chars.length, 0);
 
     return chars.length;
+  }
+
+  /**
+   * Syscall: fopen - open file
+   * Returns file handle, or -1 on error
+   */
+  private syscallFopen(filenameAddr: number, mode: number): number {
+    if (!this.filesystem) {
+      return 0xFFFFFFFF; // No filesystem
+    }
+
+    // Read filename from memory (format: "NAME.EXT\0")
+    let filename = '';
+    let addr = filenameAddr;
+    for (let i = 0; i < 100; i++) {
+      const ch = this.readByte(addr++);
+      if (ch === 0) break;
+      filename += String.fromCharCode(ch);
+    }
+
+    // Parse name.ext
+    filename = filename.toUpperCase();
+    const dotIndex = filename.lastIndexOf('.');
+    const name = dotIndex > 0 ? filename.slice(0, dotIndex) : filename;
+    const ext = dotIndex > 0 ? filename.slice(dotIndex + 1) : '';
+
+    // Read file
+    const data = this.filesystem.readFile(name, ext);
+    if (!data && mode === 0) {
+      return 0xFFFFFFFF; // File not found (read mode)
+    }
+
+    // Create handle
+    const handle = this.nextFileHandle++;
+    this.fileHandles.set(handle, {
+      name,
+      extension: ext,
+      data: data ?? new Uint8Array(0),
+      cursor: 0,
+      mode: mode === 0 ? 'r' : 'w',
+    });
+
+    return handle;
+  }
+
+  /**
+   * Syscall: fread - read from file
+   * Returns number of bytes read, or -1 on error
+   */
+  private syscallFread(handle: number, buffer: number, count: number): number {
+    const fh = this.fileHandles.get(handle);
+    if (!fh || fh.mode !== 'r') {
+      return 0xFFFFFFFF; // Invalid handle or not readable
+    }
+
+    // Read up to count bytes
+    const available = fh.data.length - fh.cursor;
+    const toRead = Math.min(count, available);
+
+    for (let i = 0; i < toRead; i++) {
+      this.writeByte(buffer + i, fh.data[fh.cursor++]);
+    }
+
+    return toRead;
+  }
+
+  /**
+   * Syscall: fwrite - write to file
+   * Returns number of bytes written, or -1 on error
+   */
+  private syscallFwrite(handle: number, buffer: number, count: number): number {
+    const fh = this.fileHandles.get(handle);
+    if (!fh || fh.mode !== 'w') {
+      return 0xFFFFFFFF; // Invalid handle or not writable
+    }
+
+    // Extend data buffer if needed
+    const newSize = fh.cursor + count;
+    if (newSize > fh.data.length) {
+      const newData = new Uint8Array(newSize);
+      newData.set(fh.data);
+      fh.data = newData;
+    }
+
+    // Write bytes
+    for (let i = 0; i < count; i++) {
+      fh.data[fh.cursor++] = this.readByte(buffer + i);
+    }
+
+    return count;
+  }
+
+  /**
+   * Syscall: fclose - close file
+   * Returns 0 on success, -1 on error
+   */
+  private syscallFclose(handle: number): number {
+    const fh = this.fileHandles.get(handle);
+    if (!fh) {
+      return 0xFFFFFFFF; // Invalid handle
+    }
+
+    // If write mode, save file to filesystem
+    if (fh.mode === 'w' && this.filesystem) {
+      if (!this.filesystem.fileExists(fh.name, fh.extension)) {
+        this.filesystem.createFile(fh.name, fh.extension);
+      }
+      this.filesystem.writeFile(fh.name, fh.extension, fh.data);
+    }
+
+    this.fileHandles.delete(handle);
+    return 0;
+  }
+
+  /**
+   * Syscall: readdir - read directory entry
+   * Returns 1 if entry read, 0 if no more entries, -1 on error
+   */
+  private syscallReaddir(nameBuffer: number, extBuffer: number, sizeBuffer: number): number {
+    if (!this.filesystem) {
+      return 0xFFFFFFFF; // No filesystem
+    }
+
+    // Initialize directory iteration on first call
+    if (!this.dirFileList) {
+      this.dirFileList = this.filesystem.listFiles();
+      this.dirIterator = 0;
+    }
+
+    // Check if more entries
+    if (this.dirIterator >= this.dirFileList.length) {
+      // Reset for next iteration
+      this.dirFileList = null;
+      this.dirIterator = 0;
+      return 0; // No more entries
+    }
+
+    // Get current entry
+    const file = this.dirFileList[this.dirIterator++];
+
+    // Write name (8 bytes, padded with spaces)
+    const name = file.name.padEnd(8, ' ');
+    for (let i = 0; i < 8; i++) {
+      this.writeByte(nameBuffer + i, name.charCodeAt(i));
+    }
+
+    // Write extension (3 bytes, padded with spaces)
+    const ext = file.extension.padEnd(3, ' ');
+    for (let i = 0; i < 3; i++) {
+      this.writeByte(extBuffer + i, ext.charCodeAt(i));
+    }
+
+    // Write size (4 bytes, little-endian)
+    this.writeByte(sizeBuffer + 0, file.size & 0xFF);
+    this.writeByte(sizeBuffer + 1, (file.size >> 8) & 0xFF);
+    this.writeByte(sizeBuffer + 2, (file.size >> 16) & 0xFF);
+    this.writeByte(sizeBuffer + 3, (file.size >> 24) & 0xFF);
+
+    return 1; // Entry read successfully
   }
 }
