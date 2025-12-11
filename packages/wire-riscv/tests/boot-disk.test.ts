@@ -491,6 +491,52 @@ describe('InteractiveSystem', () => {
       const output = cpu.consoleOutput;
       expect(output).toContain('Hi');
     });
+
+    it('should run quietly when auto-executing', () => {
+      const fs = system.getFilesystem();
+      expect(fs).not.toBeNull();
+
+      // Assemble HELLO.ASM to HELLO.BIN
+      typeString(system, 'run ASM.BIN\r');
+      system.tick(5000);
+
+      // Clear console
+      cpu.consoleOutput = '';
+
+      // Type just 'hello' (auto-execute)
+      typeString(system, 'hello\r');
+      system.tick(2000);
+
+      // Should NOT show debug output
+      const output = cpu.consoleOutput;
+      expect(output).not.toContain('Loaded at');
+      expect(output).not.toContain('Entry point');
+      expect(output).not.toContain('Executed');
+      expect(output).not.toContain('cycles');
+    });
+
+    it('should show debug output when using run command explicitly', () => {
+      const fs = system.getFilesystem();
+      expect(fs).not.toBeNull();
+
+      // Assemble HELLO.ASM to HELLO.BIN
+      typeString(system, 'run ASM.BIN\r');
+      system.tick(5000);
+
+      // Clear console
+      cpu.consoleOutput = '';
+
+      // Use explicit 'run' command
+      typeString(system, 'run HELLO.BIN\r');
+      system.tick(2000);
+
+      // Should show debug output
+      const output = cpu.consoleOutput;
+      expect(output).toContain('Loaded at');
+      expect(output).toContain('Entry point');
+      expect(output).toContain('Executed');
+      expect(output).toContain('cycles');
+    });
   });
 });
 

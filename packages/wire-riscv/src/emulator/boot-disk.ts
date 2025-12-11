@@ -655,7 +655,7 @@ export class InteractiveSystem {
         if (this.fs) {
           const name = command.toUpperCase();
           if (this.fs.fileExists(name, 'BIN')) {
-            this.cmdRun([name]);
+            this.cmdRun([name], false); // Run quietly (no debug output)
             return;
           }
         }
@@ -770,7 +770,7 @@ export class InteractiveSystem {
   /**
    * Run (execute program) command
    */
-  private cmdRun(args: string[]): void {
+  private cmdRun(args: string[], verbose: boolean = true): void {
     if (!this.fs) {
       this.println('No filesystem');
       return;
@@ -815,15 +815,23 @@ export class InteractiveSystem {
       this.cpu.pc = loadInfo.entryPoint;
       this.cpu.x[2] = loadInfo.stackTop; // sp
 
-      this.println(`Loaded at 0x${loadInfo.codeBase.toString(16)}`);
-      this.println(`Entry point: 0x${loadInfo.entryPoint.toString(16)}`);
+      if (verbose) {
+        this.println(`Loaded at 0x${loadInfo.codeBase.toString(16)}`);
+        this.println(`Entry point: 0x${loadInfo.entryPoint.toString(16)}`);
+      }
 
       // Run program
       const cycles = this.cpu.run(100000);
-      this.println(`Executed ${cycles} cycles`);
+
+      if (verbose) {
+        this.println(`Executed ${cycles} cycles`);
+
+        if (this.cpu.halted) {
+          this.println('Program halted');
+        }
+      }
 
       if (this.cpu.halted) {
-        this.println('Program halted');
         this.cpu.halted = false; // Allow continuing
       }
     } catch (err) {
