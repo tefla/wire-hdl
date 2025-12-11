@@ -41,34 +41,14 @@ describe('BootDisk', () => {
   });
 
   describe('built-in commands', () => {
-    it('should have help command', () => {
+    it('should have shell executable', () => {
       const disk = bootDisk.create();
       const fs = new WireFS(disk);
 
-      // Shell includes built-in help
+      // Shell is the only executable on disk
+      // cat, ls, asm are shell built-ins (no .BIN files)
       const shell = fs.readFile('SHELL', 'BIN');
       expect(shell).not.toBeNull();
-    });
-
-    it('should have cat command', () => {
-      const disk = bootDisk.create();
-      const fs = new WireFS(disk);
-
-      expect(fs.fileExists('CAT', 'BIN')).toBe(true);
-    });
-
-    it('should have ls command', () => {
-      const disk = bootDisk.create();
-      const fs = new WireFS(disk);
-
-      expect(fs.fileExists('LS', 'BIN')).toBe(true);
-    });
-
-    it('should have asm command', () => {
-      const disk = bootDisk.create();
-      const fs = new WireFS(disk);
-
-      expect(fs.fileExists('ASM', 'BIN')).toBe(true);
     });
   });
 

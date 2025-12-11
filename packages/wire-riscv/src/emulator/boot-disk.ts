@@ -45,10 +45,8 @@ export class BootDisk {
     // Add shell program
     this.addShell();
 
-    // Add command programs
-    this.addCommand('CAT', this.createCatProgram());
-    this.addCommand('LS', this.createLsProgram());
-    this.addCommand('ASM', this.createAsmProgram());
+    // Note: cat, ls, asm commands are implemented as shell built-ins
+    // in InteractiveSystem for now. Native RISC-V versions planned for future.
 
     // Add sample files
     this.addSampleFiles();
@@ -98,53 +96,6 @@ loop:   ADDI t0, zero, 0
     return code;
   }
 
-  /**
-   * Create cat command program
-   */
-  private createCatProgram(): Uint8Array {
-    // Cat prints file contents - placeholder
-    const asm = new NativeAssembler();
-    return asm.assemble(`
-; CAT - display file contents
-; Arguments passed in memory by shell
-        ECALL   ; Exit (actual implementation in InteractiveSystem)
-`);
-  }
-
-  /**
-   * Create ls command program
-   */
-  private createLsProgram(): Uint8Array {
-    const asm = new NativeAssembler();
-    return asm.assemble(`
-; LS - list files
-        ECALL   ; Exit (actual implementation in InteractiveSystem)
-`);
-  }
-
-  /**
-   * Create asm command program
-   */
-  private createAsmProgram(): Uint8Array {
-    const asm = new NativeAssembler();
-    return asm.assemble(`
-; ASM - assembler
-        ECALL   ; Exit (actual implementation in InteractiveSystem)
-`);
-  }
-
-  /**
-   * Add a command program to disk
-   */
-  private addCommand(name: string, code: Uint8Array): void {
-    const exe = new ExecutableBuilder()
-      .setCode(code)
-      .setStackSize(512)
-      .build();
-
-    this.fs.createFile(name, 'BIN');
-    this.fs.writeFile(name, 'BIN', exe);
-  }
 
   /**
    * Add sample files to disk
