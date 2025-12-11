@@ -6,6 +6,8 @@
  * 32-bit program counter
  */
 
+import { GraphicsCard, GRAPHICS_BASE } from './graphics.js';
+
 // Instruction format opcodes
 export const OPCODE = {
   LUI: 0b0110111, // Load Upper Immediate
@@ -108,12 +110,21 @@ export class RiscVCpu {
   public memory: Uint8Array;
   public halted: boolean = false;
   public cycles: number = 0;
+  public gpu: GraphicsCard;
 
   constructor(config: RiscVConfig = {}) {
     const memorySize = config.memorySize ?? 64 * 1024; // 64KB default
     this.memory = new Uint8Array(memorySize);
     this.x = new Uint32Array(32);
     this.pc = config.initialPc ?? 0;
+    this.gpu = new GraphicsCard();
+  }
+
+  /**
+   * Get the attached graphics card
+   */
+  getGraphicsCard(): GraphicsCard {
+    return this.gpu;
   }
 
   /**
@@ -139,6 +150,10 @@ export class RiscVCpu {
    * Read a 32-bit word from memory (little-endian)
    */
   readWord(address: number): number {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      return this.gpu.mmioRead(address);
+    }
     return (
       (this.memory[address] |
         (this.memory[address + 1] << 8) |
@@ -152,6 +167,10 @@ export class RiscVCpu {
    * Read a 16-bit halfword from memory (little-endian)
    */
   readHalfword(address: number): number {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      return this.gpu.mmioReadHalfword(address);
+    }
     return this.memory[address] | (this.memory[address + 1] << 8);
   }
 
@@ -159,6 +178,10 @@ export class RiscVCpu {
    * Read a byte from memory
    */
   readByte(address: number): number {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      return this.gpu.mmioReadByte(address);
+    }
     return this.memory[address];
   }
 
@@ -166,6 +189,11 @@ export class RiscVCpu {
    * Write a 32-bit word to memory (little-endian)
    */
   writeWord(address: number, value: number): void {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      this.gpu.mmioWrite(address, value);
+      return;
+    }
     this.memory[address] = value & 0xff;
     this.memory[address + 1] = (value >> 8) & 0xff;
     this.memory[address + 2] = (value >> 16) & 0xff;
@@ -176,6 +204,11 @@ export class RiscVCpu {
    * Write a 16-bit halfword to memory (little-endian)
    */
   writeHalfword(address: number, value: number): void {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      this.gpu.mmioWriteHalfword(address, value);
+      return;
+    }
     this.memory[address] = value & 0xff;
     this.memory[address + 1] = (value >> 8) & 0xff;
   }
@@ -184,6 +217,11 @@ export class RiscVCpu {
    * Write a byte to memory
    */
   writeByte(address: number, value: number): void {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      this.gpu.mmioWriteByte(address, value);
+      return;
+    }
     this.memory[address] = value & 0xff;
   }
 
