@@ -295,6 +295,18 @@ describe('InteractiveSystem', () => {
       const output = getScreenText(cpu);
       expect(output).toContain('Executed');
     });
+
+    it('should produce output when running assembled program', () => {
+      // Assemble and run
+      typeString(system, 'asm HELLO.ASM\r');
+      system.tick(1000);
+      typeString(system, 'run HELLO.BIN\r');
+      system.tick(1000);
+
+      // The HELLO.ASM program prints "Hi" using putchar syscalls
+      const output = getScreenText(cpu);
+      expect(output).toContain('Hi');
+    });
   });
 
   describe('tick control', () => {

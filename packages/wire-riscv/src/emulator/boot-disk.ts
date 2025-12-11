@@ -173,7 +173,8 @@ Commands:
         ECALL
         ADDI a0, zero, 10   ; newline
         ECALL
-        ECALL               ; exit
+        ADDI a7, zero, 0    ; exit syscall
+        ECALL
 `;
     this.fs.createFile('HELLO', 'ASM');
     this.fs.writeFile('HELLO', 'ASM', new TextEncoder().encode(helloAsm));
