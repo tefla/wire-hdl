@@ -54,6 +54,7 @@ import TESTFWD_ASM from '../../asm/testfwd.asm?raw';
 import TESTDW_ASM from '../../asm/testdw.asm?raw';
 import TESTBIG_ASM from '../../asm/testbig.asm?raw';
 import TESTSTR_ASM from '../../asm/teststr.asm?raw';
+import TESTFWDLO_ASM from '../../asm/testfwdlo.asm?raw';
 // Source code for distribution
 import SHELL_ASM from '../../asm/shell-boot.asm?raw';
 import ASM_ASM from '../../asm/asm.asm?raw';
@@ -281,6 +282,7 @@ export function createFloppyDisk(): Uint8Array[] {
     { name: 'TESTDW', ext: 'ASM', data: textToBytes(TESTDW_ASM) },   // 17
     { name: 'TESTBIG', ext: 'ASM', data: textToBytes(TESTBIG_ASM) }, // 18
     { name: 'TESTSTR', ext: 'ASM', data: textToBytes(TESTSTR_ASM) }, // 19
+    { name: 'TESTFWDL', ext: 'ASM', data: textToBytes(TESTFWDLO_ASM) }, // 20 - forward ref with < >
     // SRC directory (index 20)
     { name: 'SRC', ext: '', data: new Uint8Array(0), isDirectory: true },
     // Files in SRC/ (indices 15+)

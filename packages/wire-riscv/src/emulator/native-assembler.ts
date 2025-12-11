@@ -199,11 +199,51 @@ export class NativeAssembler {
   }
 
   /**
+   * Remove comments from a line, respecting quoted strings
+   */
+  private removeComments(line: string): string {
+    let result = '';
+    let inString = false;
+    let escaped = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+
+      if (escaped) {
+        result += ch;
+        escaped = false;
+        continue;
+      }
+
+      if (ch === '\\' && inString) {
+        result += ch;
+        escaped = true;
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = !inString;
+        result += ch;
+        continue;
+      }
+
+      if (!inString && (ch === ';' || ch === '#')) {
+        // Found comment start outside of string
+        break;
+      }
+
+      result += ch;
+    }
+
+    return result;
+  }
+
+  /**
    * Process a single line of source
    */
   private processLine(line: string): void {
-    // Remove comments
-    line = line.replace(/[;#].*$/, '').trim();
+    // Remove comments (but not if inside quotes)
+    line = this.removeComments(line).trim();
 
     if (!line) {
       return;
@@ -347,6 +387,22 @@ export class NativeAssembler {
           case '0': result += '\0'; i += 2; break;
           case '\\': result += '\\'; i += 2; break;
           case '"': result += '"'; i += 2; break;
+          case 'x': {
+            // Hex escape: \xHH
+            if (i + 3 < str.length) {
+              const hex = str.substring(i + 2, i + 4);
+              const code = parseInt(hex, 16);
+              if (!isNaN(code)) {
+                result += String.fromCharCode(code);
+                i += 4;
+                break;
+              }
+            }
+            // If invalid hex, fall through to default
+            result += str[i];
+            i++;
+            break;
+          }
           default: result += str[i]; i++; break;
         }
       } else {

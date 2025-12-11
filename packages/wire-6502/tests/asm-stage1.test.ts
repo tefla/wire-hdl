@@ -683,6 +683,80 @@ describe('ASM.COM Forward Reference Support (task-11.2)', () => {
     expect(computer.memory[outputBuf + 3]).toBe(0xea);  // NOP
     expect(computer.memory[outputBuf + 4]).toBe(0x60);  // RTS
   });
+
+  /**
+   * Test for forward reference with < > operators
+   * TESTFWDL.ASM has:
+   *   .ORG $0800
+   *   LDA #<MSG       ; Forward reference with < ($0800-$0801)
+   *   LDX #>MSG       ; Forward reference with > ($0802-$0803)
+   *   RTS             ; ($0804)
+   *   MSG:            ; Address $0805
+   *   .DB "Test", 0
+   *
+   * Expected output: $A9 $05 $A2 $08 $60 $54 $65 $73 $74 $00
+   *   LDA #$05 (low byte of MSG = $0805)
+   *   LDX #$08 (high byte of MSG = $0805)
+   *   RTS
+   *   "Test", 0
+   */
+  it('should resolve forward references with < > operators', async () => {
+    const computer = new TestComputer();
+
+    // Create and insert floppy disk
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    const gotPrompt = computer.runUntilOutput('/>', 100000);
+    expect(gotPrompt).toBe(true);
+    computer.clearOutput();
+
+    // Install files
+    computer.sendLine('INSTALL');
+    const installDone = computer.runUntilOutput('Done', 500000);
+    expect(installDone).toBe(true);
+    computer.clearOutput();
+
+    // Assemble TESTFWDL.ASM which uses forward reference with < >
+    computer.sendLine('AS TESTFWDL.ASM');
+
+    // Run until assembly completes or fails
+    const gotComplete = computer.runUntilOutput('Assembly complete', 5000000);
+
+    // Debug output if failed
+    if (!gotComplete) {
+      console.log('AS TESTFWDL.ASM output:', computer.output);
+    }
+
+    // Should succeed without errors
+    expect(computer.output).not.toContain('Error');
+    expect(gotComplete).toBe(true);
+
+    // Verify output bytes:
+    // LDA #$05 = $A9 $05
+    // LDX #$08 = $A2 $08
+    // RTS = $60
+    // "Test", 0 = $54 $65 $73 $74 $00
+    const outputBuf = 0x4000;  // OUT_BUF
+    expect(computer.memory[outputBuf + 0]).toBe(0xa9);  // LDA immediate opcode
+    expect(computer.memory[outputBuf + 1]).toBe(0x05);  // Low byte of $0805
+    expect(computer.memory[outputBuf + 2]).toBe(0xa2);  // LDX immediate opcode
+    expect(computer.memory[outputBuf + 3]).toBe(0x08);  // High byte of $0805
+    expect(computer.memory[outputBuf + 4]).toBe(0x60);  // RTS
+    expect(computer.memory[outputBuf + 5]).toBe(0x54);  // 'T'
+    expect(computer.memory[outputBuf + 6]).toBe(0x65);  // 'e'
+    expect(computer.memory[outputBuf + 7]).toBe(0x73);  // 's'
+    expect(computer.memory[outputBuf + 8]).toBe(0x74);  // 't'
+    expect(computer.memory[outputBuf + 9]).toBe(0x00);  // null terminator
+  });
 });
 
 describe('ASM.COM Large File Streaming (task-11.3)', () => {
@@ -1025,7 +1099,7 @@ describe('AS.COM Bootstrap Chain (task-8.1)', () => {
    * handles this correctly, so ASM2.COM is precompiled by stage0.
    * TODO: Investigate why native AS.COM fails on asm2.asm forward refs
    */
-  it.skip('should assemble asm2.asm from SRC directory', async () => {
+  it('should assemble asm2.asm from SRC directory', async () => {
     const computer = new TestComputer();
 
     // Create and insert floppy (has ASM2.ASM in SRC directory)
