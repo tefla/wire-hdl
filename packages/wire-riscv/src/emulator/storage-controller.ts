@@ -87,6 +87,27 @@ export class StorageController {
   }
 
   /**
+   * Get the HDD device
+   */
+  getHdd(): HardDiskDrive {
+    return this.hdd;
+  }
+
+  /**
+   * Get the CD-ROM device
+   */
+  getCdrom(): CDROMDrive {
+    return this.cdrom;
+  }
+
+  /**
+   * Get the USB device
+   */
+  getUsb(): USBDrive {
+    return this.usb;
+  }
+
+  /**
    * Get the currently selected device
    */
   getSelectedDevice(): BlockDevice | null {

@@ -1,7 +1,7 @@
 ---
 id: task-21
 title: ECALL syscall handler
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 16:00'
 labels:
@@ -42,18 +42,18 @@ Implement system call handling via ECALL instruction. Currently ECALL halts the 
 
 ## Subtasks
 
-- [ ] task-21.1: Implement syscall dispatcher in CPU
-- [ ] task-21.2: Implement console syscalls (putchar, getchar, puts)
-- [ ] task-21.3: Implement disk syscalls (read_sector, write_sector)
+- [x] task-21.1: Implement syscall dispatcher in CPU
+- [x] task-21.2: Implement console syscalls (putchar, getchar, puts)
+- [x] task-21.3: Implement disk syscalls (read_sector, write_sector)
 
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE_CRITERIA:BEGIN -->
-- [ ] ECALL dispatches based on a7 register
-- [ ] putchar writes to screen at cursor position
-- [ ] getchar reads from keyboard buffer
-- [ ] puts prints string to screen
-- [ ] Disk syscalls work with storage controller
-- [ ] Exit syscall halts with exit code
-- [ ] 15+ tests for syscalls
+- [x] ECALL dispatches based on a7 register
+- [x] putchar writes to screen at cursor position
+- [x] getchar reads from keyboard buffer
+- [x] puts prints string to screen
+- [x] Disk syscalls work with storage controller
+- [x] Exit syscall halts with exit code
+- [x] 15+ tests for syscalls (18 tests implemented)
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->

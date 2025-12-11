@@ -109,6 +109,16 @@ function signExtend(value: number, bits: number): number {
 /**
  * RISC-V RV32I CPU Emulator
  */
+// Syscall numbers
+export const SYSCALL = {
+  EXIT: 0,
+  PUTCHAR: 1,
+  GETCHAR: 2,
+  PUTS: 3,
+  READ_SECTOR: 4,
+  WRITE_SECTOR: 5,
+} as const;
+
 export class RiscVCpu {
   public x: Uint32Array; // Registers
   public pc: number;
@@ -118,6 +128,10 @@ export class RiscVCpu {
   public gpu: GraphicsCard;
   public storage: StorageController;
   public keyboard: KeyboardController;
+
+  // Syscall-related state
+  public exitCode: number = 0;
+  public consoleOutput: string = '';
 
   constructor(config: RiscVConfig = {}) {
     const memorySize = config.memorySize ?? 64 * 1024; // 64KB default
@@ -660,9 +674,11 @@ export class RiscVCpu {
         const { imm } = this.decodeI(instruction);
 
         if (imm === 0) {
-          // ECALL - environment call
-          this.halted = true;
-          return false;
+          // ECALL - environment call (dispatch to syscall handler)
+          const result = this.handleSyscall();
+          if (result === false) {
+            return false; // CPU halted
+          }
         } else if (imm === 1) {
           // EBREAK - breakpoint
           this.halted = true;
@@ -705,5 +721,147 @@ export class RiscVCpu {
       halted: this.halted,
       cycles: this.cycles,
     };
+  }
+
+  /**
+   * Handle ECALL syscall
+   * Returns false if CPU should halt, true to continue
+   */
+  private handleSyscall(): boolean {
+    const syscallNum = this.getReg(17); // a7
+    const a0 = this.getReg(10);
+    const a1 = this.getReg(11);
+
+    switch (syscallNum) {
+      case SYSCALL.EXIT:
+        // Exit with code in a0
+        this.exitCode = a0;
+        this.halted = true;
+        return false;
+
+      case SYSCALL.PUTCHAR:
+        // Write character in a0 to console
+        this.syscallPutchar(a0);
+        this.setReg(10, 0); // Return 0 (success)
+        return true;
+
+      case SYSCALL.GETCHAR:
+        // Read character from keyboard
+        this.setReg(10, this.syscallGetchar());
+        return true;
+
+      case SYSCALL.PUTS:
+        // Print null-terminated string at address a0
+        this.setReg(10, this.syscallPuts(a0));
+        return true;
+
+      case SYSCALL.READ_SECTOR:
+        // Read sector a0 to buffer at a1
+        this.setReg(10, this.syscallReadSector(a0, a1));
+        return true;
+
+      case SYSCALL.WRITE_SECTOR:
+        // Write buffer at a1 to sector a0
+        this.setReg(10, this.syscallWriteSector(a0, a1));
+        return true;
+
+      default:
+        // Unknown syscall - return -1
+        this.setReg(10, 0xFFFFFFFF);
+        return true;
+    }
+  }
+
+  /**
+   * Syscall: putchar - write character to console
+   */
+  private syscallPutchar(char: number): void {
+    const ch = char & 0xFF;
+    this.consoleOutput += String.fromCharCode(ch);
+
+    // Also write to screen VRAM if it's a printable character
+    const cursor = this.gpu.getCursorPosition();
+
+    if (ch === 0x0D || ch === 0x0A) {
+      // Carriage return or newline - move to start of next line
+      this.gpu.writeRegister(0x04, 0); // CURSOR_X = 0
+      this.gpu.writeRegister(0x08, Math.min(cursor.y + 1, 24)); // CURSOR_Y++
+    } else if (ch === 0x08) {
+      // Backspace - move cursor back
+      if (cursor.x > 0) {
+        this.gpu.writeRegister(0x04, cursor.x - 1);
+        this.gpu.writeTextVram(cursor.x - 1, cursor.y, 0x20, 0x07);
+      }
+    } else if (ch >= 0x20) {
+      // Printable character - write to VRAM and advance cursor
+      this.gpu.writeTextVram(cursor.x, cursor.y, ch, 0x07);
+      const newX = cursor.x + 1;
+      if (newX >= 80) {
+        // Line wrap
+        this.gpu.writeRegister(0x04, 0);
+        this.gpu.writeRegister(0x08, Math.min(cursor.y + 1, 24));
+      } else {
+        this.gpu.writeRegister(0x04, newX);
+      }
+    }
+  }
+
+  /**
+   * Syscall: getchar - read character from keyboard (non-blocking)
+   */
+  private syscallGetchar(): number {
+    if (this.keyboard.hasKey()) {
+      return this.keyboard.readRegister(0x04); // Read DATA register
+    }
+    return 0xFFFFFFFF; // -1 (no key available)
+  }
+
+  /**
+   * Syscall: puts - print null-terminated string
+   */
+  private syscallPuts(address: number): number {
+    let count = 0;
+    let addr = address;
+    while (true) {
+      const ch = this.readByte(addr);
+      if (ch === 0) break;
+      this.syscallPutchar(ch);
+      addr++;
+      count++;
+      // Safety limit
+      if (count > 10000) break;
+    }
+    return count;
+  }
+
+  /**
+   * Syscall: read_sector - read disk sector to memory
+   */
+  private syscallReadSector(sector: number, buffer: number): number {
+    try {
+      const data = this.storage.getHdd().read(sector, 1); // Read 1 sector
+      for (let i = 0; i < data.length; i++) {
+        this.writeByte(buffer + i, data[i]);
+      }
+      return 0; // Success
+    } catch {
+      return 0xFFFFFFFF; // Error
+    }
+  }
+
+  /**
+   * Syscall: write_sector - write memory to disk sector
+   */
+  private syscallWriteSector(sector: number, buffer: number): number {
+    try {
+      const data = new Uint8Array(512);
+      for (let i = 0; i < 512; i++) {
+        data[i] = this.readByte(buffer + i);
+      }
+      this.storage.getHdd().write(sector, data);
+      return 0; // Success
+    } catch {
+      return 0xFFFFFFFF; // Error
+    }
   }
 }
