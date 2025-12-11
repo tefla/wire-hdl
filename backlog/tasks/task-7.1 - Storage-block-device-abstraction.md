@@ -1,7 +1,7 @@
 ---
 id: task-7.1
 title: 'Storage: Block device abstraction layer with tests'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:

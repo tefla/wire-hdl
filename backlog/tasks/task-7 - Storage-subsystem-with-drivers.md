@@ -1,7 +1,7 @@
 ---
 id: task-7
 title: Storage subsystem with drivers (USB, CD-ROM, HDD)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:
