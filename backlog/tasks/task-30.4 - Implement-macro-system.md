@@ -1,7 +1,7 @@
 ---
 id: task-30.4
 title: Implement macro system (.macro/.endmacro)
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 14:25'
 labels:

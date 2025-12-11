@@ -505,6 +505,97 @@ VALUE2 EQU 20
       }
     });
   });
+
+  describe('Macro system', () => {
+    it('should define and expand simple macro', () => {
+      const source = `
+.macro NOP
+        ADDI x0, x0, 0
+.endmacro
+
+        NOP
+        NOP
+      `;
+      const binary = assembler.assemble(source);
+
+      expect(binary.length).toBe(8);  // 2 NOPs
+      expect(readWord(binary, 0)).toBe(0x00000013);
+      expect(readWord(binary, 4)).toBe(0x00000013);
+    });
+
+    it('should expand macro with parameters', () => {
+      const source = `
+.macro PUSH reg
+        ADDI sp, sp, -4
+        SW \\reg, 0(sp)
+.endmacro
+
+        PUSH a0
+        PUSH a1
+      `;
+      const binary = assembler.assemble(source);
+
+      expect(binary.length).toBe(16);  // 2 instructions per macro * 2 invocations
+      // First PUSH a0
+      expect(readWord(binary, 0)).toBe(0xFFC10113);  // ADDI sp, sp, -4
+      expect(readWord(binary, 4)).toBe(0x00A12023);  // SW a0, 0(sp)
+      // Second PUSH a1
+      expect(readWord(binary, 8)).toBe(0xFFC10113);  // ADDI sp, sp, -4
+      expect(readWord(binary, 12)).toBe(0x00B12023); // SW a1, 0(sp)
+    });
+
+    it('should handle macros with multiple parameters', () => {
+      const source = `
+.macro ADD3 rd, rs1, rs2
+        ADD \\rd, \\rs1, \\rs2
+.endmacro
+
+        ADD3 a0, a1, a2
+      `;
+      const binary = assembler.assemble(source);
+
+      // ADD a0, a1, a2 = 0x00C58533
+      expect(readWord(binary, 0)).toBe(0x00C58533);
+    });
+
+    it('should expand macros with no parameters', () => {
+      const source = `
+.macro INIT_STACK
+        LUI sp, 0x10
+        ADDI sp, sp, 0
+.endmacro
+
+        INIT_STACK
+      `;
+      const binary = assembler.assemble(source);
+
+      expect(binary.length).toBe(8);
+      expect(readWord(binary, 0)).toBe(0x00010137);  // LUI sp, 0x10
+      expect(readWord(binary, 4)).toBe(0x00010113);  // ADDI sp, sp, 0
+    });
+
+    it('should allow nested macro invocations', () => {
+      const source = `
+.macro NOP
+        ADDI x0, x0, 0
+.endmacro
+
+.macro NOP3
+        NOP
+        NOP
+        NOP
+.endmacro
+
+        NOP3
+      `;
+      const binary = assembler.assemble(source);
+
+      expect(binary.length).toBe(12);  // 3 NOPs
+      expect(readWord(binary, 0)).toBe(0x00000013);
+      expect(readWord(binary, 4)).toBe(0x00000013);
+      expect(readWord(binary, 8)).toBe(0x00000013);
+    });
+  });
 });
 
 /**

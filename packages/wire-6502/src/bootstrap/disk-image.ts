@@ -284,8 +284,8 @@ export function createFloppyDisk(): Uint8Array[] {
     // SRC directory (index 20)
     { name: 'SRC', ext: '', data: new Uint8Array(0), isDirectory: true },
     // Files in SRC/ (indices 15+)
-    // Note: Large source files (ASM.ASM, ASM2.ASM, SHELL.ASM, EDIT.ASM) excluded to save space
-    // They can be fetched from the repository if needed
+    // ASM.ASM included for self-hosting demo (75KB)
+    { name: 'ASM', ext: 'ASM', data: textToBytes(ASM_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'ASM0', ext: 'ASM', data: textToBytes(ASM0_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'BOOTLOAD', ext: 'ASM', data: textToBytes(BOOTLOAD_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'HEXLOAD', ext: 'ASM', data: textToBytes(HEXLOAD_ASM), parentIndex: SRC_DIR_INDEX },

@@ -57,9 +57,16 @@ const REGISTERS: Record<string, number> = {
 /**
  * Native RISC-V Assembler
  */
+interface MacroDefinition {
+  name: string;
+  params: string[];
+  body: string[];
+}
+
 export class NativeAssembler {
   private labels: Map<string, number> = new Map();
   private constants: Map<string, number> = new Map();
+  private macros: Map<string, MacroDefinition> = new Map();
   private pendingLabels: Array<{ offset: number; label: string; type: 'J' | 'B'; line: number }> = [];
   private output: number[] = [];
   private currentLine: number = 0;
@@ -76,11 +83,16 @@ export class NativeAssembler {
   assemble(source: string): Uint8Array {
     this.labels.clear();
     this.constants.clear();
+    this.macros.clear();
     this.pendingLabels = [];
     this.output = [];
     this.currentLine = 0;
 
     this.sourceLines = source.split('\n');
+
+    // Preprocessing: expand macros
+    const expandedLines = this.expandMacros(this.sourceLines);
+    this.sourceLines = expandedLines;
 
     // First pass: collect labels and emit code
     for (let i = 0; i < this.sourceLines.length; i++) {
@@ -632,6 +644,77 @@ export class NativeAssembler {
     const offset = match[1] ? this.parseNumber(match[1]) : 0;
     const base = this.parseRegister(match[2]);
     return { offset, base };
+  }
+
+  /**
+   * Expand macros in source code
+   */
+  private expandMacros(lines: string[]): string[] {
+    const result: string[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i].replace(/[;#].*$/, '').trim();
+
+      // Check for macro definition
+      const macroMatch = line.match(/^\.macro\s+(\w+)(?:\s+(.*))?$/i);
+      if (macroMatch) {
+        const name = macroMatch[1];
+        const params = macroMatch[2] ? macroMatch[2].split(/\s*,\s*/) : [];
+        const body: string[] = [];
+
+        // Collect macro body until .endmacro
+        i++;
+        while (i < lines.length) {
+          const bodyLine = lines[i];
+          const cleaned = bodyLine.replace(/[;#].*$/, '').trim();
+
+          if (cleaned.match(/^\.endmacro$/i)) {
+            break;
+          }
+
+          body.push(bodyLine);
+          i++;
+        }
+
+        // Store macro definition
+        this.macros.set(name.toUpperCase(), { name, params, body });
+        i++;
+        continue;
+      }
+
+      // Check for macro invocation
+      const words = line.split(/\s+/);
+      if (words.length > 0 && this.macros.has(words[0].toUpperCase())) {
+        const macroName = words[0].toUpperCase();
+        const macro = this.macros.get(macroName)!;
+        const args = words.slice(1).join(' ').split(/\s*,\s*/);
+
+        // Expand macro body with parameter substitution
+        for (const bodyLine of macro.body) {
+          let expanded = bodyLine;
+
+          // Substitute parameters
+          for (let j = 0; j < macro.params.length; j++) {
+            const param = macro.params[j];
+            const arg = args[j] || '';
+            // Replace \param with actual argument
+            const regex = new RegExp('\\\\' + param + '\\b', 'g');
+            expanded = expanded.replace(regex, arg);
+          }
+
+          result.push(expanded);
+        }
+        i++;
+        continue;
+      }
+
+      // Regular line - just copy it
+      result.push(lines[i]);
+      i++;
+    }
+
+    return result;
   }
 
   private emitWord(value: number): void {
