@@ -1,7 +1,7 @@
 ---
 id: task-31.3
 title: File load/save operations
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 15:00'
 labels:
@@ -47,11 +47,11 @@ Implement file loading and saving functionality using the filesystem syscalls.
 
 ## Acceptance Criteria
 
-- [ ] Can load existing file into text buffer
-- [ ] Can save text buffer to file
-- [ ] Handles non-existent files (new file)
-- [ ] Handles empty files
-- [ ] Preserves line endings correctly
-- [ ] Reports errors for I/O failures
-- [ ] Clears modified flag after successful save
-- [ ] 6+ tests for file operations
+- [x] Can load existing file into text buffer
+- [x] Can save text buffer to file
+- [x] Handles non-existent files (new file)
+- [x] Handles empty files
+- [x] Preserves line endings correctly
+- [x] Reports errors for I/O failures
+- [x] Clears modified flag after successful save (implemented via FCLOSE)
+- [x] 6+ tests for file operations (8 tests implemented)
