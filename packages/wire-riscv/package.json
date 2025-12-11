@@ -10,7 +10,11 @@
     "build": "tsc",
     "build:web": "vite build",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "asm": "bun run src/assembler/cli.ts"
+  },
+  "bin": {
+    "riscv-asm": "./src/assembler/cli.ts"
   },
   "keywords": [
     "riscv",

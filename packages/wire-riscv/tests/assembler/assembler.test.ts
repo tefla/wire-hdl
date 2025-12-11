@@ -370,6 +370,303 @@ value:
     });
   });
 
+  describe('complete programs', () => {
+    it('should assemble hello_cpu.asm - minimal program', () => {
+      const asm = new Assembler(`
+.org 0x0000
+        li x1, 42      ; Load immediate
+        addi x2, x1, 1 ; x2 = 43
+        ebreak         ; Stop
+      `);
+      const result = asm.assemble();
+      expect(result.errors).toHaveLength(0);
+
+      const cpu = new RiscVCpu();
+      cpu.loadProgram(result.bytes);
+      cpu.run(100);
+
+      expect(cpu.getReg(1)).toBe(42);
+      expect(cpu.getReg(2)).toBe(43);
+      expect(cpu.halted).toBe(true);
+    });
+
+    it('should assemble loop.asm - countdown loop', () => {
+      const asm = new Assembler(`
+.org 0x0000
+        li x1, 10      ; Counter
+loop:
+        addi x1, x1, -1
+        bnez x1, loop  ; Branch if not zero
+        ebreak
+      `);
+      const result = asm.assemble();
+      expect(result.errors).toHaveLength(0);
+
+      const cpu = new RiscVCpu();
+      cpu.loadProgram(result.bytes);
+      cpu.run(200);
+
+      expect(cpu.getReg(1)).toBe(0);
+      expect(cpu.halted).toBe(true);
+    });
+
+    it('should assemble subroutine.asm - function call', () => {
+      const asm = new Assembler(`
+.org 0x0000
+        li a0, 7
+        jal ra, double
+        ebreak
+double:
+        add a0, a0, a0
+        ret
+      `);
+      const result = asm.assemble();
+      expect(result.errors).toHaveLength(0);
+
+      const cpu = new RiscVCpu();
+      cpu.loadProgram(result.bytes);
+      cpu.run(100);
+
+      expect(cpu.getReg(10)).toBe(14); // a0 = 7 * 2
+      expect(cpu.halted).toBe(true);
+    });
+
+    it('should assemble data.asm - load from data section', () => {
+      const asm = new Assembler(`
+.org 0x0000
+        la x1, message
+        lb x2, 0(x1)
+        lb x3, 1(x1)
+        ebreak
+.org 0x0100
+message:
+        .asciiz "Hi"
+      `);
+      const result = asm.assemble();
+      expect(result.errors).toHaveLength(0);
+
+      const cpu = new RiscVCpu({ memorySize: 0x200 });
+      cpu.loadProgram(result.bytes);
+      cpu.run(100);
+
+      expect(cpu.getReg(2)).toBe(0x48); // 'H'
+      expect(cpu.getReg(3)).toBe(0x69); // 'i'
+    });
+
+    it('should assemble bootloader_skeleton.asm', () => {
+      const asm = new Assembler(`
+; RISC-V Bootloader Skeleton
+.org 0x0000
+_start:
+        ; Set up stack pointer
+        lui sp, 0x10
+        ; Jump to main
+        jal ra, main
+        ; Halt
+        ebreak
+main:
+        ; Bootloader code here
+        li a0, 0x1234
+        ret
+      `);
+      const result = asm.assemble();
+      expect(result.errors).toHaveLength(0);
+      expect(result.symbols.get('_start')).toBe(0);
+      expect(result.symbols.get('main')).toBeDefined();
+
+      const cpu = new RiscVCpu({ memorySize: 0x200 });
+      cpu.loadProgram(result.bytes);
+      cpu.run(100);
+
+      expect(cpu.getReg(2)).toBe(0x10000); // sp = 0x10 << 12
+      expect(cpu.getReg(10)).toBe(0x1234); // a0
+      expect(cpu.halted).toBe(true);
+    });
+
+    it('should assemble fibonacci program', () => {
+      const asm = new Assembler(`
+; Calculate Fibonacci(10)
+.org 0x0000
+        li a0, 10       ; n = 10
+        jal ra, fib
+        ebreak
+
+; fib(n): returns nth Fibonacci number
+; a0 = n, returns result in a0
+fib:
+        ; Base cases: fib(0) = 0, fib(1) = 1
+        li t0, 0        ; f(n-2)
+        li t1, 1        ; f(n-1)
+        li t2, 0        ; counter
+
+fib_loop:
+        bge t2, a0, fib_done
+        add t3, t0, t1  ; f(n) = f(n-1) + f(n-2)
+        mv t0, t1       ; f(n-2) = f(n-1)
+        mv t1, t3       ; f(n-1) = f(n)
+        addi t2, t2, 1
+        j fib_loop
+
+fib_done:
+        mv a0, t0
+        ret
+      `);
+      const result = asm.assemble();
+      expect(result.errors).toHaveLength(0);
+
+      const cpu = new RiscVCpu();
+      cpu.loadProgram(result.bytes);
+      cpu.run(500);
+
+      // fib(10) = 55
+      expect(cpu.getReg(10)).toBe(55);
+      expect(cpu.halted).toBe(true);
+    });
+
+    it('should assemble memory copy program', () => {
+      const asm = new Assembler(`
+; Copy 4 bytes from src to dst
+.org 0x0000
+        la a0, src      ; source address
+        la a1, dst      ; dest address
+        li a2, 4        ; count
+
+copy_loop:
+        beqz a2, done
+        lb t0, 0(a0)    ; load byte
+        sb t0, 0(a1)    ; store byte
+        addi a0, a0, 1
+        addi a1, a1, 1
+        addi a2, a2, -1
+        j copy_loop
+
+done:
+        ebreak
+
+.org 0x0100
+src:
+        .byte 0x11, 0x22, 0x33, 0x44
+.org 0x0200
+dst:
+        .space 4
+      `);
+      const result = asm.assemble();
+      expect(result.errors).toHaveLength(0);
+
+      const cpu = new RiscVCpu({ memorySize: 0x300 });
+      cpu.loadProgram(result.bytes);
+      cpu.run(200);
+
+      // Verify copy worked
+      expect(cpu.readByte(0x200)).toBe(0x11);
+      expect(cpu.readByte(0x201)).toBe(0x22);
+      expect(cpu.readByte(0x202)).toBe(0x33);
+      expect(cpu.readByte(0x203)).toBe(0x44);
+    });
+
+    it('should assemble all ALU operations program', () => {
+      const asm = new Assembler(`
+; Test all ALU operations
+.org 0x0000
+        li x1, 15       ; 0x0F
+        li x2, 5        ; 0x05
+
+        ; Arithmetic
+        add x3, x1, x2  ; 15 + 5 = 20
+        sub x4, x1, x2  ; 15 - 5 = 10
+
+        ; Logical
+        and x5, x1, x2  ; 0x0F & 0x05 = 0x05
+        or x6, x1, x2   ; 0x0F | 0x05 = 0x0F
+        xor x7, x1, x2  ; 0x0F ^ 0x05 = 0x0A
+
+        ; Shifts
+        sll x8, x2, x1  ; 5 << 15
+        srl x9, x1, x2  ; 15 >> 5 (logical)
+
+        ; Compare
+        slt x10, x2, x1 ; 5 < 15 = 1
+
+        ebreak
+      `);
+      const result = asm.assemble();
+      expect(result.errors).toHaveLength(0);
+
+      const cpu = new RiscVCpu();
+      cpu.loadProgram(result.bytes);
+      cpu.run(100);
+
+      expect(cpu.getReg(3)).toBe(20);  // add
+      expect(cpu.getReg(4)).toBe(10);  // sub
+      expect(cpu.getReg(5)).toBe(5);   // and
+      expect(cpu.getReg(6)).toBe(15);  // or
+      expect(cpu.getReg(7)).toBe(10);  // xor
+      expect(cpu.getReg(10)).toBe(1);  // slt
+    });
+
+    it('should assemble program with all branch types', () => {
+      const asm = new Assembler(`
+.org 0x0000
+        li t0, 10
+        li t1, 20
+        li a0, 0        ; result accumulator
+
+        ; Test BEQ (should not branch)
+        beq t0, t1, skip1
+        addi a0, a0, 1  ; +1
+skip1:
+        ; Test BNE (should branch)
+        bne t0, t1, take1
+        addi a0, a0, 100
+take1:
+        addi a0, a0, 2  ; +2
+
+        ; Test BLT (should branch, 10 < 20)
+        blt t0, t1, take2
+        addi a0, a0, 100
+take2:
+        addi a0, a0, 4  ; +4
+
+        ; Test BGE (should not branch, 10 !>= 20)
+        bge t0, t1, skip2
+        addi a0, a0, 8  ; +8
+skip2:
+        ebreak
+      `);
+      const result = asm.assemble();
+      expect(result.errors).toHaveLength(0);
+
+      const cpu = new RiscVCpu();
+      cpu.loadProgram(result.bytes);
+      cpu.run(100);
+
+      // Should be 1 + 2 + 4 + 8 = 15
+      expect(cpu.getReg(10)).toBe(15);
+    });
+
+    it('should assemble program with negative numbers', () => {
+      const asm = new Assembler(`
+.org 0x0000
+        li x1, -5
+        li x2, -10
+        add x3, x1, x2   ; -5 + -10 = -15
+        sub x4, x1, x2   ; -5 - -10 = 5
+        slt x5, x2, x1   ; -10 < -5 = 1 (signed)
+        ebreak
+      `);
+      const result = asm.assemble();
+      expect(result.errors).toHaveLength(0);
+
+      const cpu = new RiscVCpu();
+      cpu.loadProgram(result.bytes);
+      cpu.run(100);
+
+      expect(cpu.getReg(3) | 0).toBe(-15);  // Convert to signed
+      expect(cpu.getReg(4)).toBe(5);
+      expect(cpu.getReg(5)).toBe(1);
+    });
+  });
+
   describe('error messages', () => {
     it('should include line numbers in errors', () => {
       const asm = new Assembler(`
@@ -379,6 +676,27 @@ ADD x1, x2
       const result = asm.assemble();
       expect(result.errors.length).toBeGreaterThan(0);
       expect(result.errors[0].line).toBe(3);
+    });
+
+    it('should error on invalid register', () => {
+      const asm = new Assembler('ADD x32, x1, x2');
+      const result = asm.assemble();
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+
+    it('should error on syntax errors', () => {
+      const asm = new Assembler('ADDI x1, x2,');
+      const result = asm.assemble();
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+
+    it('should handle multiple errors', () => {
+      const asm = new Assembler(`
+JAL ra, undefined1
+JAL ra, undefined2
+      `);
+      const result = asm.assemble();
+      expect(result.errors.length).toBe(2);
     });
   });
 });
