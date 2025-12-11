@@ -376,6 +376,61 @@ VALUE2 EQU 20
       expect(() => assembler.assemble(source)).toThrow();
     });
   });
+
+  describe('Enhanced data directives', () => {
+    it('should support multiple .byte values', () => {
+      const source = '.byte 0x12, 0x34, 0x56';
+      const binary = assembler.assemble(source);
+
+      expect(binary.length).toBe(3);
+      expect(binary[0]).toBe(0x12);
+      expect(binary[1]).toBe(0x34);
+      expect(binary[2]).toBe(0x56);
+    });
+
+    it('should support multiple .word values', () => {
+      const source = '.word 0x1000, 0x2000';
+      const binary = assembler.assemble(source);
+
+      expect(binary.length).toBe(8);
+      expect(readWord(binary, 0)).toBe(0x1000);
+      expect(readWord(binary, 4)).toBe(0x2000);
+    });
+
+    it('should support .string as alias for .asciiz', () => {
+      const source = '.string "Hello"';
+      const binary = assembler.assemble(source);
+
+      expect(binary.length).toBe(6);  // "Hello" + null terminator
+      expect(binary[0]).toBe(0x48);  // 'H'
+      expect(binary[4]).toBe(0x6F);  // 'o'
+      expect(binary[5]).toBe(0);     // null terminator
+    });
+
+    it('should process escape sequences in strings', () => {
+      const source = '.string "Hello\\nWorld"';
+      const binary = assembler.assemble(source);
+
+      expect(binary.length).toBe(12);  // "Hello\nWorld" + null
+      expect(binary[0]).toBe(0x48);    // 'H'
+      expect(binary[5]).toBe(0x0A);    // '\n'
+      expect(binary[6]).toBe(0x57);    // 'W'
+      expect(binary[11]).toBe(0);      // null
+    });
+
+    it('should handle all escape sequences', () => {
+      const source = '.ascii "tab\\there\\r\\nnull\\0quote\\"backslash\\\\"';
+      const binary = assembler.assemble(source);
+
+      const text = new TextDecoder().decode(binary);
+      expect(text).toContain('\t');
+      expect(text).toContain('\r');
+      expect(text).toContain('\n');
+      expect(text).toContain('\0');
+      expect(text).toContain('"');
+      expect(text).toContain('\\');
+    });
+  });
 });
 
 /**

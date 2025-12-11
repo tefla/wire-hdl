@@ -175,29 +175,51 @@ export class NativeAssembler {
    * Process directive
    */
   private processDirective(line: string): void {
-    const parts = line.split(/\s+/, 2);
-    const directive = parts[0].toLowerCase();
-    const args = parts[1] || '';
+    // Split only on first whitespace to preserve comma-separated values
+    const match = line.match(/^(\S+)\s*(.*)$/);
+    if (!match) {
+      throw new AssemblerError('Invalid directive', this.currentLine);
+    }
+    const directive = match[1].toLowerCase();
+    const args = match[2] || '';
 
     switch (directive) {
-      case '.byte':
-        this.output.push(this.parseNumber(args) & 0xFF);
+      case '.byte': {
+        // Support comma-separated values
+        const values = args.split(',').map((v) => v.trim());
+        for (const val of values) {
+          this.output.push(this.parseNumber(val) & 0xFF);
+        }
         break;
+      }
 
-      case '.word':
-        this.emitWord(this.parseNumber(args));
+      case '.word': {
+        // Support comma-separated values
+        const values = args.split(',').map((v) => v.trim());
+        for (const val of values) {
+          this.emitWord(this.parseNumber(val));
+        }
         break;
+      }
 
       case '.ascii':
-      case '.asciiz': {
-        const match = args.match(/"([^"]*)"/);
+      case '.asciiz':
+      case '.string': {
+        // .string is an alias for .asciiz
+        const shouldNullTerminate = directive === '.asciiz' || directive === '.string';
+
+        // Match string allowing escaped quotes: "..." where \" is allowed inside
+        const match = args.match(/"((?:[^"\\]|\\.)*)"/);
         if (!match) {
           throw new AssemblerError('Invalid string literal', this.currentLine);
         }
-        for (const char of match[1]) {
+
+        // Process escape sequences
+        const str = this.processEscapeSequences(match[1]);
+        for (const char of str) {
           this.output.push(char.charCodeAt(0));
         }
-        if (directive === '.asciiz') {
+        if (shouldNullTerminate) {
           this.output.push(0);
         }
         break;
@@ -214,6 +236,32 @@ export class NativeAssembler {
       default:
         throw new AssemblerError(`Unknown directive: ${directive}`, this.currentLine);
     }
+  }
+
+  /**
+   * Process escape sequences in strings
+   */
+  private processEscapeSequences(str: string): string {
+    let result = '';
+    let i = 0;
+    while (i < str.length) {
+      if (str[i] === '\\' && i + 1 < str.length) {
+        const next = str[i + 1];
+        switch (next) {
+          case 'n': result += '\n'; i += 2; break;
+          case 't': result += '\t'; i += 2; break;
+          case 'r': result += '\r'; i += 2; break;
+          case '0': result += '\0'; i += 2; break;
+          case '\\': result += '\\'; i += 2; break;
+          case '"': result += '"'; i += 2; break;
+          default: result += str[i]; i++; break;
+        }
+      } else {
+        result += str[i];
+        i++;
+      }
+    }
+    return result;
   }
 
   /**

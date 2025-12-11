@@ -1,7 +1,7 @@
 ---
 id: task-30.2
 title: Implement data directives (.byte, .word, .string)
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 14:25'
 labels:
