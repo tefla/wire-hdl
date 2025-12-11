@@ -63,6 +63,7 @@ export class NativeAssembler {
   private pendingLabels: Array<{ offset: number; label: string; type: 'J' | 'B'; line: number }> = [];
   private output: number[] = [];
   private currentLine: number = 0;
+  private sourceLines: string[] = [];
 
   constructor(
     private cpu?: RiscVCpu,
@@ -79,12 +80,12 @@ export class NativeAssembler {
     this.output = [];
     this.currentLine = 0;
 
-    const lines = source.split('\n');
+    this.sourceLines = source.split('\n');
 
     // First pass: collect labels and emit code
-    for (let i = 0; i < lines.length; i++) {
+    for (let i = 0; i < this.sourceLines.length; i++) {
       this.currentLine = i + 1;
-      this.processLine(lines[i]);
+      this.processLine(this.sourceLines[i]);
     }
 
     // Second pass: resolve pending labels
@@ -129,6 +130,43 @@ export class NativeAssembler {
     const binary = this.assemble(source);
     this.fs.createFile(name, extension);
     return this.fs.writeFile(name, extension, binary);
+  }
+
+  /**
+   * Create an error with context
+   */
+  private error(message: string): AssemblerError {
+    let errorMessage = `Line ${this.currentLine}: ${message}`;
+
+    // Add context lines
+    if (this.sourceLines.length > 0) {
+      const contextLines: string[] = [];
+      const lineNum = this.currentLine;
+
+      // Show line before (if exists)
+      if (lineNum > 1 && lineNum - 1 <= this.sourceLines.length) {
+        contextLines.push(`  ${lineNum - 1} | ${this.sourceLines[lineNum - 2]}`);
+      }
+
+      // Show current line with caret
+      if (lineNum <= this.sourceLines.length) {
+        const currentLine = this.sourceLines[lineNum - 1];
+        contextLines.push(`  ${lineNum} | ${currentLine}`);
+
+        // Add caret pointing to line
+        const indent = `  ${lineNum} | `.length;
+        contextLines.push(' '.repeat(indent) + '^'.repeat(Math.max(1, currentLine.trim().length)));
+      }
+
+      // Show line after (if exists)
+      if (lineNum < this.sourceLines.length) {
+        contextLines.push(`  ${lineNum + 1} | ${this.sourceLines[lineNum]}`);
+      }
+
+      errorMessage += '\n' + contextLines.join('\n');
+    }
+
+    return new AssemblerError(errorMessage, this.currentLine);
   }
 
   /**
@@ -178,7 +216,7 @@ export class NativeAssembler {
     // Split only on first whitespace to preserve comma-separated values
     const match = line.match(/^(\S+)\s*(.*)$/);
     if (!match) {
-      throw new AssemblerError('Invalid directive', this.currentLine);
+      throw this.error('Invalid directive');
     }
     const directive = match[1].toLowerCase();
     const args = match[2] || '';
@@ -211,7 +249,7 @@ export class NativeAssembler {
         // Match string allowing escaped quotes: "..." where \" is allowed inside
         const match = args.match(/"((?:[^"\\]|\\.)*)"/);
         if (!match) {
-          throw new AssemblerError('Invalid string literal', this.currentLine);
+          throw this.error('Invalid string literal');
         }
 
         // Process escape sequences
@@ -234,7 +272,7 @@ export class NativeAssembler {
       }
 
       default:
-        throw new AssemblerError(`Unknown directive: ${directive}`, this.currentLine);
+        throw this.error(`Unknown directive: ${directive}`);
     }
   }
 
@@ -354,13 +392,13 @@ export class NativeAssembler {
         break;
 
       default:
-        throw new AssemblerError(`Unknown instruction: ${mnemonic}`, this.currentLine);
+        throw this.error(`Unknown instruction: ${mnemonic}`);
     }
   }
 
   private emitLUI(operands: string[]): void {
     if (operands.length !== 2) {
-      throw new AssemblerError('LUI requires 2 operands', this.currentLine);
+      throw this.error('LUI requires 2 operands');
     }
     const rd = this.parseRegister(operands[0]);
     const imm = this.parseNumber(operands[1]);
@@ -371,7 +409,7 @@ export class NativeAssembler {
 
   private emitAUIPC(operands: string[]): void {
     if (operands.length !== 2) {
-      throw new AssemblerError('AUIPC requires 2 operands', this.currentLine);
+      throw this.error('AUIPC requires 2 operands');
     }
     const rd = this.parseRegister(operands[0]);
     const imm = this.parseNumber(operands[1]);
@@ -381,7 +419,7 @@ export class NativeAssembler {
 
   private emitJAL(operands: string[]): void {
     if (operands.length !== 2) {
-      throw new AssemblerError('JAL requires 2 operands', this.currentLine);
+      throw this.error('JAL requires 2 operands');
     }
     const rd = this.parseRegister(operands[0]);
     const target = operands[1];
@@ -417,7 +455,7 @@ export class NativeAssembler {
 
   private emitJALR(operands: string[]): void {
     if (operands.length !== 3) {
-      throw new AssemblerError('JALR requires 3 operands', this.currentLine);
+      throw this.error('JALR requires 3 operands');
     }
     const rd = this.parseRegister(operands[0]);
     const rs1 = this.parseRegister(operands[1]);
@@ -429,7 +467,7 @@ export class NativeAssembler {
 
   private emitBranch(mnemonic: string, operands: string[]): void {
     if (operands.length !== 3) {
-      throw new AssemblerError(`${mnemonic} requires 3 operands`, this.currentLine);
+      throw this.error(`${mnemonic} requires 3 operands`);
     }
     const rs1 = this.parseRegister(operands[0]);
     const rs2 = this.parseRegister(operands[1]);
@@ -471,7 +509,7 @@ export class NativeAssembler {
 
   private emitLoad(mnemonic: string, operands: string[]): void {
     if (operands.length !== 2) {
-      throw new AssemblerError(`${mnemonic} requires 2 operands`, this.currentLine);
+      throw this.error(`${mnemonic} requires 2 operands`);
     }
     const rd = this.parseRegister(operands[0]);
     const { offset, base } = this.parseMemoryOperand(operands[1]);
@@ -488,7 +526,7 @@ export class NativeAssembler {
 
   private emitStore(mnemonic: string, operands: string[]): void {
     if (operands.length !== 2) {
-      throw new AssemblerError(`${mnemonic} requires 2 operands`, this.currentLine);
+      throw this.error(`${mnemonic} requires 2 operands`);
     }
     const rs2 = this.parseRegister(operands[0]);
     const { offset, base } = this.parseMemoryOperand(operands[1]);
@@ -507,7 +545,7 @@ export class NativeAssembler {
 
   private emitImmALU(mnemonic: string, operands: string[]): void {
     if (operands.length !== 3) {
-      throw new AssemblerError(`${mnemonic} requires 3 operands`, this.currentLine);
+      throw this.error(`${mnemonic} requires 3 operands`);
     }
     const rd = this.parseRegister(operands[0]);
     const rs1 = this.parseRegister(operands[1]);
@@ -533,7 +571,7 @@ export class NativeAssembler {
 
   private emitRegALU(mnemonic: string, operands: string[]): void {
     if (operands.length !== 3) {
-      throw new AssemblerError(`${mnemonic} requires 3 operands`, this.currentLine);
+      throw this.error(`${mnemonic} requires 3 operands`);
     }
     const rd = this.parseRegister(operands[0]);
     const rs1 = this.parseRegister(operands[1]);
@@ -558,7 +596,7 @@ export class NativeAssembler {
   private parseRegister(name: string): number {
     const normalized = name.toLowerCase();
     if (!(normalized in REGISTERS)) {
-      throw new AssemblerError(`Invalid register: ${name}`, this.currentLine);
+      throw this.error(`Invalid register: ${name}`);
     }
     return REGISTERS[normalized];
   }
@@ -573,7 +611,7 @@ export class NativeAssembler {
 
     // Check if it looks like an identifier (not a number)
     if (/^[a-zA-Z_]\w*$/.test(str)) {
-      throw new AssemblerError(`Undefined constant: ${str}`, this.currentLine);
+      throw this.error(`Undefined constant: ${str}`);
     }
 
     if (str.startsWith('0x') || str.startsWith('0X')) {
@@ -589,7 +627,7 @@ export class NativeAssembler {
     // Format: offset(reg) or just (reg)
     const match = operand.match(/(-?\d+|0x[0-9a-fA-F]+)?\((\w+)\)/);
     if (!match) {
-      throw new AssemblerError(`Invalid memory operand: ${operand}`, this.currentLine);
+      throw this.error(`Invalid memory operand: ${operand}`);
     }
     const offset = match[1] ? this.parseNumber(match[1]) : 0;
     const base = this.parseRegister(match[2]);

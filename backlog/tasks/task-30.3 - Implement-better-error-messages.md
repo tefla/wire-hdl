@@ -1,7 +1,7 @@
 ---
 id: task-30.3
 title: Implement better error messages with line numbers
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 14:25'
 labels:

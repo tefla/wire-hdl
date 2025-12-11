@@ -431,6 +431,80 @@ VALUE2 EQU 20
       expect(text).toContain('\\');
     });
   });
+
+  describe('Error messages with context', () => {
+    it('should show line number in error', () => {
+      const source = `
+        ADDI a0, zero, 10
+        ADDX a1, a2, a3
+        ADDI a2, zero, 20
+      `;
+
+      try {
+        assembler.assemble(source);
+        expect.fail('Should have thrown error');
+      } catch (err) {
+        expect(err).toBeInstanceOf(AssemblerError);
+        const error = err as AssemblerError;
+        expect(error.message).toContain('Line 3');
+        expect(error.message).toContain('Unknown instruction: ADDX');
+      }
+    });
+
+    it('should show context lines', () => {
+      const source = `
+        ADDI a0, zero, 10
+        INVALID_INSTRUCTION
+        ADDI a2, zero, 20
+      `;
+
+      try {
+        assembler.assemble(source);
+        expect.fail('Should have thrown error');
+      } catch (err) {
+        const error = err as AssemblerError;
+        // Should show line before
+        expect(error.message).toContain('2 |');
+        expect(error.message).toContain('ADDI a0');
+        // Should show error line
+        expect(error.message).toContain('3 |');
+        expect(error.message).toContain('INVALID_INSTRUCTION');
+        // Should show line after
+        expect(error.message).toContain('4 |');
+        expect(error.message).toContain('ADDI a2');
+      }
+    });
+
+    it('should show caret pointing to error', () => {
+      const source = 'ADDX a1, a2, a3';
+
+      try {
+        assembler.assemble(source);
+        expect.fail('Should have thrown error');
+      } catch (err) {
+        const error = err as AssemblerError;
+        // Should have caret line
+        expect(error.message).toContain('^');
+      }
+    });
+
+    it('should work for undefined constant error', () => {
+      const source = `
+        BUFFER_SIZE EQU 1024
+        ADDI a0, zero, UNDEFINED_CONST
+      `;
+
+      try {
+        assembler.assemble(source);
+        expect.fail('Should have thrown error');
+      } catch (err) {
+        const error = err as AssemblerError;
+        expect(error.message).toContain('Line 3');
+        expect(error.message).toContain('Undefined constant: UNDEFINED_CONST');
+        expect(error.message).toContain('3 |');
+      }
+    });
+  });
 });
 
 /**
