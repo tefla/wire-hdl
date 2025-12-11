@@ -61,6 +61,8 @@ export class TextRenderer {
     const cursorEnabled = showCursor && gpu.isCursorEnabled();
     const cursorBlinking = cursorBlink && gpu.isCursorBlinking();
     const showCursorNow = cursorEnabled && (!cursorBlinking || blinkState);
+    const cursorStartLine = gpu.getCursorStartScanline();
+    const cursorEndLine = gpu.getCursorEndScanline();
 
     // Render each character cell
     for (let row = 0; row < TEXT_ROWS; row++) {
@@ -78,7 +80,7 @@ export class TextRenderer {
         // Check if cursor is at this position
         const isCursorCell = showCursorNow && col === cursorPos.x && row === cursorPos.y;
 
-        this.renderChar(col, row, charCode, fgColor, bgColor, isCursorCell);
+        this.renderChar(col, row, charCode, fgColor, bgColor, isCursorCell, cursorStartLine, cursorEndLine);
       }
     }
 
@@ -94,7 +96,9 @@ export class TextRenderer {
     charCode: number,
     fgColor: [number, number, number],
     bgColor: [number, number, number],
-    showCursor: boolean
+    showCursor: boolean,
+    cursorStartLine: number,
+    cursorEndLine: number
   ): void {
     const startX = col * FONT_WIDTH;
     const startY = row * FONT_HEIGHT;
@@ -108,8 +112,8 @@ export class TextRenderer {
         // Determine if this pixel is foreground or background
         let isForeground = isPixelSet(charCode, px, py);
 
-        // Cursor: invert colors in the cursor region (typically bottom 2 scanlines)
-        if (showCursor && py >= FONT_HEIGHT - 2) {
+        // Cursor: invert colors in the cursor region (configurable scanlines)
+        if (showCursor && py >= cursorStartLine && py <= cursorEndLine) {
           isForeground = !isForeground;
         }
 

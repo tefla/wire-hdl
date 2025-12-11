@@ -70,7 +70,9 @@ export class GraphicsCard {
   private mode: DisplayMode = DisplayMode.TEXT;
   private cursorX: number = 0;
   private cursorY: number = 0;
-  private cursorCtrl: number = 0x01; // Cursor enabled by default
+  // CURSOR_CTRL: bit 0=enable, bit 1=blink, bits 4-7=blink rate, bits 8-11=start scanline, bits 12-15=end scanline
+  // Default: enabled, no blink, underline (scanlines 14-15)
+  private cursorCtrl: number = 0xFE01; // end=15, start=14, enabled
   private status: number = 0;
 
   // Memory regions
@@ -518,6 +520,18 @@ export class GraphicsCard {
 
   isCursorBlinking(): boolean {
     return (this.cursorCtrl & 0x02) !== 0;
+  }
+
+  getCursorBlinkRate(): number {
+    return (this.cursorCtrl >> 4) & 0x0F;
+  }
+
+  getCursorStartScanline(): number {
+    return (this.cursorCtrl >> 8) & 0x0F;
+  }
+
+  getCursorEndScanline(): number {
+    return (this.cursorCtrl >> 12) & 0x0F;
   }
 
   getTextVram(): Uint8Array {

@@ -40,7 +40,8 @@ describe('GraphicsCard', () => {
     });
 
     it('should read/write CURSOR_CTRL register', () => {
-      expect(gpu.readRegister(GRAPHICS_REGS.CURSOR_CTRL)).toBe(0x01); // Enabled by default
+      // Default: enabled, underline cursor (scanlines 14-15)
+      expect(gpu.readRegister(GRAPHICS_REGS.CURSOR_CTRL)).toBe(0xFE01);
       gpu.writeRegister(GRAPHICS_REGS.CURSOR_CTRL, 0x03); // Enable + blink
       expect(gpu.readRegister(GRAPHICS_REGS.CURSOR_CTRL)).toBe(0x03);
     });
