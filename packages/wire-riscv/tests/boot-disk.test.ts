@@ -471,6 +471,26 @@ describe('InteractiveSystem', () => {
       // Should show "Assembled XX bytes"
       expect(output).toMatch(/Assembled.*\d+.*bytes/);
     });
+
+    it('should run executable by name without run command', () => {
+      const fs = system.getFilesystem();
+      expect(fs).not.toBeNull();
+
+      // Assemble HELLO.ASM to HELLO.BIN
+      typeString(system, 'run ASM.BIN\r');
+      system.tick(5000);
+
+      // Clear console
+      cpu.consoleOutput = '';
+
+      // Type just 'hello' (not 'run hello')
+      typeString(system, 'hello\r');
+      system.tick(2000);
+
+      // Should execute HELLO.BIN and print "Hi"
+      const output = cpu.consoleOutput;
+      expect(output).toContain('Hi');
+    });
   });
 });
 

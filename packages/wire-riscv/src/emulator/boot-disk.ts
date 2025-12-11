@@ -651,6 +651,14 @@ export class InteractiveSystem {
         this.cmdExit();
         break;
       default:
+        // Try to find and run as executable
+        if (this.fs) {
+          const name = command.toUpperCase();
+          if (this.fs.fileExists(name, 'BIN')) {
+            this.cmdRun([name]);
+            return;
+          }
+        }
         this.println(`Unknown command: ${command}`);
     }
   }
