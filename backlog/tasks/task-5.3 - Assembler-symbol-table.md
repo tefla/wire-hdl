@@ -1,7 +1,7 @@
 ---
 id: task-5.3
 title: 'Assembler: Symbol table and label resolution with tests'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:

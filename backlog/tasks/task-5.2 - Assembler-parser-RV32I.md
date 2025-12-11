@@ -1,7 +1,7 @@
 ---
 id: task-5.2
 title: 'Assembler: Parser for RV32I instructions with tests'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:

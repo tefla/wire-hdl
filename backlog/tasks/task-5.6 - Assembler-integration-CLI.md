@@ -1,7 +1,7 @@
 ---
 id: task-5.6
 title: 'Assembler: Integration tests and CLI interface'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:
