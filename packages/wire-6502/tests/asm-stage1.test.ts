@@ -157,6 +157,10 @@ class TestComputer {
       if (diskCmd === 1) {
         for (let i = 0; i < count; i++) {
           const sectorData = this.hdd.get(sector + i) || new Uint8Array(512);
+          // Debug high sector reads
+          if (sector >= 300 && this.debugReads) {
+            console.log(`HDD READ: sector=${sector + i} -> buf=$${bufAddr.toString(16)}, first bytes: ${Array.from(sectorData.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+          }
           for (let j = 0; j < 512; j++) {
             this.memory[bufAddr + i * 512 + j] = sectorData[j];
           }
@@ -173,6 +177,11 @@ class TestComputer {
 
       this.memory[IO.DISK_CMD] = 0;
     }
+  }
+
+  debugReads = false;
+  enableDebugReads(): void {
+    this.debugReads = true;
   }
 
   run(instructions: number): void {
@@ -463,8 +472,8 @@ describe('ASM.COM Stage 1 Assembler', () => {
     computer.runUntilOutput('/SRC/', 100000);
     computer.clearOutput();
 
-    // Check CUR_DIR after CD - should be 19 (entry index of SRC)
-    expect(computer.memory[CUR_DIR_LO]).toBe(19);  // SRC is entry 19
+    // Check CUR_DIR after CD - should be 20 (entry index of SRC)
+    expect(computer.memory[CUR_DIR_LO]).toBe(20);  // SRC is entry 20
     expect(computer.memory[CUR_DIR_HI]).toBe(0);
 
     // Try to assemble HELLO.ASM in SRC directory
@@ -731,4 +740,273 @@ describe('ASM.COM Large File Streaming (task-11.3)', () => {
     expect(computer.memory[outputBuf + 1]).toBe(0x42);  // #$42
     expect(computer.memory[outputBuf + 2]).toBe(0x60);  // RTS
   });
+});
+
+describe('ASM.COM String Literal Support (task-11.5)', () => {
+  /**
+   * Test for .DB with string literals
+   * TESTSTR.ASM has:
+   *   .ORG $0800
+   *   MSG1: .DB "Hi"           ; Should emit $48, $69
+   *   MSG2: .DB "OK", $0D, $0A, 0  ; Should emit $4F, $4B, $0D, $0A, $00
+   *   MSG3: .DB "A"            ; Should emit $41
+   *   MSG4: .DB ""             ; Should emit nothing
+   *   MSG5: .DB "X", "Y"       ; Should emit $58, $59
+   *   END:  RTS                ; Should emit $60
+   *
+   * Expected output: $48 $69 $4F $4B $0D $0A $00 $41 $58 $59 $60
+   */
+  it('should support .DB directive with string literals', async () => {
+    const computer = new TestComputer();
+
+    // Create and insert floppy disk
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    const gotPrompt = computer.runUntilOutput('/>', 100000);
+    expect(gotPrompt).toBe(true);
+    computer.clearOutput();
+
+    // Install files
+    computer.sendLine('INSTALL');
+    computer.runUntilOutput('Done', 500000);
+    computer.clearOutput();
+
+    // Assemble TESTSTR.ASM
+    computer.sendLine('ASM TESTSTR.ASM');
+
+    // Run until assembly completes or fails
+    const gotComplete = computer.runUntilOutput('Assembly complete', 5000000);
+
+    // Debug output if failed
+    if (!gotComplete) {
+      console.log('ASM TESTSTR.ASM output:', computer.output);
+    }
+
+    // Should succeed without errors
+    expect(computer.output).not.toContain('Error');
+    expect(gotComplete).toBe(true);
+
+    // Verify output bytes
+    const outputBuf = 0x4000;  // OUT_BUF
+    // MSG1: "Hi" = $48 $69
+    expect(computer.memory[outputBuf + 0]).toBe(0x48);  // 'H'
+    expect(computer.memory[outputBuf + 1]).toBe(0x69);  // 'i'
+    // MSG2: "OK", $0D, $0A, 0 = $4F $4B $0D $0A $00
+    expect(computer.memory[outputBuf + 2]).toBe(0x4f);  // 'O'
+    expect(computer.memory[outputBuf + 3]).toBe(0x4b);  // 'K'
+    expect(computer.memory[outputBuf + 4]).toBe(0x0d);  // CR
+    expect(computer.memory[outputBuf + 5]).toBe(0x0a);  // LF
+    expect(computer.memory[outputBuf + 6]).toBe(0x00);  // null
+    // MSG3: "A" = $41
+    expect(computer.memory[outputBuf + 7]).toBe(0x41);  // 'A'
+    // MSG4: "" = nothing (0 bytes)
+    // MSG5: "X", "Y" = $58 $59
+    expect(computer.memory[outputBuf + 8]).toBe(0x58);  // 'X'
+    expect(computer.memory[outputBuf + 9]).toBe(0x59);  // 'Y'
+    // END: RTS = $60
+    expect(computer.memory[outputBuf + 10]).toBe(0x60); // RTS
+  });
+});
+
+describe('ASM.COM Self-Hosting (task-11.5)', () => {
+  /**
+   * Test that asm.asm can assemble itself (self-hosting)
+   * This is the ultimate test of the assembler's completeness
+   */
+  it('should assemble asm.asm (self-hosting)', async () => {
+    const computer = new TestComputer();
+
+    // Create and insert floppy disk
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    const gotPrompt = computer.runUntilOutput('/>', 100000);
+    expect(gotPrompt).toBe(true);
+    computer.clearOutput();
+
+    // Install files from floppy
+    computer.sendLine('INSTALL');
+    computer.runUntilOutput('Done', 500000);
+    computer.clearOutput();
+
+    // Now we need to write asm.asm to the HDD
+    // Read asm.asm source and write it to disk
+    const fs = await import('fs');
+    const path = await import('path');
+    const asmSource = fs.readFileSync(
+      path.join(__dirname, '../asm/asm.asm'),
+      'utf-8'
+    );
+    const asmBytes = new Uint8Array(asmSource.length);
+    for (let i = 0; i < asmSource.length; i++) {
+      asmBytes[i] = asmSource.charCodeAt(i);
+    }
+
+    // Find free directory entry and sectors
+    // Directory sector 1 has entries 0-15, sector 2 has 16-31, sector 3 has 32-47
+    // Find first free entry (status byte != 1)
+    let freeEntry = -1;
+    for (let sec = 1; sec <= 3; sec++) {
+      const dirSector = computer.hdd.get(sec);
+      if (!dirSector) continue;
+      for (let e = 0; e < 16; e++) {
+        const offset = e * 32;
+        if (dirSector[offset] !== 1) {  // Not active
+          freeEntry = (sec - 1) * 16 + e;
+          break;
+        }
+      }
+      if (freeEntry >= 0) break;
+    }
+
+    if (freeEntry < 0) {
+      console.log('No free directory entry found');
+      expect(freeEntry).toBeGreaterThanOrEqual(0);
+      return;
+    }
+
+    // Find free sectors using bitmap (sectors 4-19)
+    // For simplicity, find a contiguous range starting at high sector numbers
+    const sectorsNeeded = Math.ceil(asmBytes.length / 512);
+    let startSector = 300;  // Start looking high to avoid conflicts
+
+    // Write asm.asm data to HDD sectors
+    for (let i = 0; i < sectorsNeeded; i++) {
+      const sectorData = new Uint8Array(512);
+      const offset = i * 512;
+      const copyLen = Math.min(512, asmBytes.length - offset);
+      for (let j = 0; j < copyLen; j++) {
+        sectorData[j] = asmBytes[offset + j];
+      }
+      computer.hdd.set(startSector + i, sectorData);
+    }
+
+    // Create directory entry for ASM.ASM
+    const dirSecNum = Math.floor(freeEntry / 16) + 1;
+    const dirEntryIndex = freeEntry % 16;
+    const dirSector = computer.hdd.get(dirSecNum) || new Uint8Array(512);
+    const entryOffset = dirEntryIndex * 32;
+
+    // Status = active (1)
+    dirSector[entryOffset + 0] = 1;
+    // Name = "ASM     " (8 chars, space-padded)
+    const name = 'ASM     ';
+    for (let i = 0; i < 8; i++) {
+      dirSector[entryOffset + 1 + i] = name.charCodeAt(i);
+    }
+    // Extension = "ASM" (3 chars)
+    dirSector[entryOffset + 9] = 'A'.charCodeAt(0);
+    dirSector[entryOffset + 10] = 'S'.charCodeAt(0);
+    dirSector[entryOffset + 11] = 'M'.charCodeAt(0);
+    // Start sector (little-endian)
+    dirSector[entryOffset + 12] = startSector & 0xff;
+    dirSector[entryOffset + 13] = (startSector >> 8) & 0xff;
+    // File size (32-bit little-endian)
+    dirSector[entryOffset + 0x0e] = asmBytes.length & 0xff;
+    dirSector[entryOffset + 0x0f] = (asmBytes.length >> 8) & 0xff;
+    dirSector[entryOffset + 0x10] = (asmBytes.length >> 16) & 0xff;
+    dirSector[entryOffset + 0x11] = (asmBytes.length >> 24) & 0xff;
+    // Sector count
+    dirSector[entryOffset + 18] = sectorsNeeded & 0xff;
+    dirSector[entryOffset + 19] = (sectorsNeeded >> 8) & 0xff;
+    // Parent = root (0xFFFF)
+    dirSector[entryOffset + 21] = 0xff;
+    dirSector[entryOffset + 22] = 0xff;
+
+    computer.hdd.set(dirSecNum, dirSector);
+
+    console.log(`Created ASM.ASM: entry=${freeEntry}, sector=${startSector}, size=${asmBytes.length}, sectors=${sectorsNeeded}`);
+
+    // Debug: verify first sector content
+    const firstSector = computer.hdd.get(startSector);
+    if (firstSector) {
+      console.log(`First sector (300) first 50 bytes: ${Array.from(firstSector.slice(0, 50)).map(b => String.fromCharCode(b)).join('')}`);
+      console.log(`Expected first 50: ${asmSource.slice(0, 50)}`);
+    } else {
+      console.log('ERROR: Sector 300 not found in HDD!');
+    }
+
+    // Debug: verify directory entry
+    const debugDirSec = computer.hdd.get(dirSecNum);
+    if (debugDirSec) {
+      const nameBytes = Array.from(debugDirSec.slice(entryOffset + 1, entryOffset + 9));
+      const extBytes = Array.from(debugDirSec.slice(entryOffset + 9, entryOffset + 12));
+      const ss = debugDirSec[entryOffset + 12] | (debugDirSec[entryOffset + 13] << 8);
+      const sz = debugDirSec[entryOffset + 0x0e] | (debugDirSec[entryOffset + 0x0f] << 8) |
+                 (debugDirSec[entryOffset + 0x10] << 16) | (debugDirSec[entryOffset + 0x11] << 24);
+      const parent = debugDirSec[entryOffset + 0x15] | (debugDirSec[entryOffset + 0x16] << 8);
+      console.log(`Dir entry: name='${nameBytes.map(b => String.fromCharCode(b)).join('')}' ext='${extBytes.map(b => String.fromCharCode(b)).join('')}' start=${ss} size=${sz} parent=${parent.toString(16)}`);
+    }
+
+    // Debug: check CUR_DIR values
+    console.log(`CUR_DIR: LO=${computer.memory[0x0240].toString(16)} HI=${computer.memory[0x0241].toString(16)}`);
+
+    // Enable debug reads for sector >= 300
+    computer.enableDebugReads();
+
+    // Now try to assemble it
+    computer.sendLine('ASM ASM.ASM');
+
+    // Run for a long time - self-hosting is slow
+    // Allow up to 100 million instructions
+    for (let i = 0; i < 100000000; i++) {
+      computer.run(1000);
+      if (computer.output.includes('Assembly complete') ||
+          computer.output.includes('Error') ||
+          computer.output.includes('Assembly failed')) {
+        computer.run(10000);
+        break;
+      }
+    }
+
+    console.log('Self-hosting output:', computer.output.slice(-500));
+
+    // Check result
+    if (computer.output.includes('Error')) {
+      // Extract error details
+      const errorMatch = computer.output.match(/Error:.*line \$([0-9A-F]+)/);
+      if (errorMatch) {
+        const lineNum = parseInt(errorMatch[1], 16);
+        console.log(`Error at line ${lineNum}`);
+        // Show line content from source
+        const lines = asmSource.split('\n');
+        if (lineNum > 0 && lineNum <= lines.length) {
+          console.log(`Line ${lineNum}: "${lines[lineNum - 1].slice(0, 80)}"`);
+          if (lineNum > 1) console.log(`Line ${lineNum - 1}: "${lines[lineNum - 2].slice(0, 80)}"`);
+          if (lineNum < lines.length) console.log(`Line ${lineNum + 1}: "${lines[lineNum].slice(0, 80)}"`);
+        }
+        // Show source buffer content at error point
+        const srcBuf = 0x2000;
+        console.log(`SRC_BUF first 100 bytes: ${Array.from(computer.memory.slice(srcBuf, srcBuf + 100)).map(b => String.fromCharCode(b)).join('').replace(/\n/g, '\\n')}`);
+        const srcPtr = computer.memory[0x60] | (computer.memory[0x61] << 8);
+        console.log(`SRCPTR: $${srcPtr.toString(16)}`);
+        console.log(`Content at SRCPTR: "${Array.from(computer.memory.slice(srcPtr, srcPtr + 30)).map(b => b ? String.fromCharCode(b) : '.').join('').replace(/\n/g, '\\n')}"`);
+        console.log(`STREAM_END: $${(computer.memory[0x70] | (computer.memory[0x71] << 8)).toString(16)}`);
+        console.log(`STREAM_LEFT: $${(computer.memory[0x6c] | (computer.memory[0x6d] << 8) | (computer.memory[0x6e] << 16) | (computer.memory[0x6f] << 24)).toString(16)} (32-bit)`);
+        console.log(`STREAM_SEC: ${computer.memory[0x6a] | (computer.memory[0x6b] << 8)}`);
+        console.log(`MNEMBUF: "${Array.from(computer.memory.slice(0x40, 0x48)).map(b => b ? String.fromCharCode(b) : '.').join('')}"`);
+        console.log(`LINENUM: ${computer.memory[0x3a] | (computer.memory[0x3b] << 8)}`);
+      }
+    }
+
+    expect(computer.output).not.toContain('Error');
+    expect(computer.output).toContain('Assembly complete');
+  }, 120000);  // 2 minute timeout
 });

@@ -130,6 +130,74 @@ loop:   ADDI t0, zero, 0
       .build();
     this.fs.createFile('ECHO', 'BIN');
     this.fs.writeFile('ECHO', 'BIN', echoExe);
+
+    // CAT command - displays README.TXT
+    // Filename is embedded in data section
+    // Code is 34 instructions (136 bytes = 0x88), so data is at 0x1000 + 0x88 = 0x1088
+    const catCode = asm.assemble(`
+; CAT - native cat command
+; Cats hardcoded file (README.TXT)
+
+        ; Open file
+        LUI a0, 0x1         ; filename address (in data section)
+        ADDI a0, a0, 0x88   ; offset after code (34 instructions = 136 bytes)
+        ADDI a1, zero, 0    ; mode = read
+        ADDI a7, zero, 7    ; FOPEN syscall
+        ECALL
+
+        ; Save handle
+        ADDI s0, a0, 0      ; s0 = file handle
+
+        ; Check if open failed
+        ADDI t0, zero, -1
+        BEQ s0, t0, error
+
+; Read loop
+loop:   ADDI a0, s0, 0      ; handle
+        LUI a1, 0x2         ; buffer at 0x2000
+        ADDI a2, zero, 100  ; read 100 bytes
+        ADDI a7, zero, 8    ; FREAD syscall
+        ECALL
+
+        ; Check bytes read
+        ADDI s1, a0, 0      ; s1 = bytes read
+        BEQ s1, zero, done  ; if 0, EOF
+
+        ; Print buffer
+        ADDI s2, zero, 0    ; i = 0
+print:  BEQ s2, s1, loop    ; if i == bytes_read, read more
+        LUI t0, 0x2
+        ADD t0, t0, s2      ; t0 = buffer + i
+        LBU a0, 0(t0)       ; load byte
+        ADDI a7, zero, 1    ; PUTCHAR
+        ECALL
+        ADDI s2, s2, 1      ; i++
+        JAL zero, print
+
+done:   ; Close file
+        ADDI a0, s0, 0      ; handle
+        ADDI a7, zero, 10   ; FCLOSE syscall
+        ECALL
+        JAL zero, exit
+
+error:  ; Print error message
+        LUI a0, 0x1
+        ADDI a0, a0, 0x93   ; error msg offset (0x88 + 11 bytes for "README.TXT\0")
+        ADDI a7, zero, 3    ; PUTS
+        ECALL
+
+exit:   ADDI a7, zero, 0    ; EXIT
+        ECALL
+`);
+
+    const catData = new TextEncoder().encode('README.TXT\0File not found\0');
+    const catExe = new ExecutableBuilder()
+      .setCode(catCode)
+      .setData(catData)
+      .setStackSize(512)
+      .build();
+    this.fs.createFile('CAT', 'BIN');
+    this.fs.writeFile('CAT', 'BIN', catExe);
   }
 
   /**

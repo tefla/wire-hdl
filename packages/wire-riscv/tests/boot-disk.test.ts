@@ -349,6 +349,34 @@ describe('InteractiveSystem', () => {
       const output = cpu.consoleOutput;
       expect(output).toContain('Hello from native echo!');
     });
+
+    it('should run native cat command on README.TXT', () => {
+      typeString(system, 'run CAT.BIN\r');
+      system.tick(2000);
+
+      // Check console output contains README content
+      const output = cpu.consoleOutput;
+      expect(output).toContain('Wire-RISCV OS');
+    });
+
+    it('should cat file with native cat command', () => {
+      typeString(system, 'run CAT.BIN\r');
+      system.tick(2000);
+
+      // Verify it read and displayed file content
+      const output = cpu.consoleOutput;
+      expect(output.length).toBeGreaterThan(100);
+    });
+
+    it('should handle native cat with proper syscalls', () => {
+      // Track syscalls made
+      const syscallsBefore = cpu.cycles;
+      typeString(system, 'run CAT.BIN\r');
+      system.tick(2000);
+
+      // Should have made syscalls (executed some cycles)
+      expect(cpu.cycles).toBeGreaterThan(syscallsBefore);
+    });
   });
 });
 

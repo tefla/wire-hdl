@@ -53,6 +53,7 @@ import TESTDB2_ASM from '../../asm/testdb2.asm?raw';
 import TESTFWD_ASM from '../../asm/testfwd.asm?raw';
 import TESTDW_ASM from '../../asm/testdw.asm?raw';
 import TESTBIG_ASM from '../../asm/testbig.asm?raw';
+import TESTSTR_ASM from '../../asm/teststr.asm?raw';
 // Source code for distribution
 import SHELL_ASM from '../../asm/shell-boot.asm?raw';
 import ASM_ASM from '../../asm/asm.asm?raw';
@@ -255,7 +256,7 @@ export function createFloppyDisk(): Uint8Array[] {
   const DATA_START = WIREFS.DATA_START;    // 20
 
   // Index 16 will be SRC directory (after the first 16 files 0-15)
-  const SRC_DIR_INDEX = 19;
+  const SRC_DIR_INDEX = 20;
   const files: FileEntry[] = [
     // Root files (indices 0-15)
     // SHELL.COM must be first so boot loader can find it easily
@@ -279,7 +280,8 @@ export function createFloppyDisk(): Uint8Array[] {
     { name: 'TESTFWD', ext: 'ASM', data: textToBytes(TESTFWD_ASM) }, // 16
     { name: 'TESTDW', ext: 'ASM', data: textToBytes(TESTDW_ASM) },   // 17
     { name: 'TESTBIG', ext: 'ASM', data: textToBytes(TESTBIG_ASM) }, // 18
-    // SRC directory (index 19)
+    { name: 'TESTSTR', ext: 'ASM', data: textToBytes(TESTSTR_ASM) }, // 19
+    // SRC directory (index 20)
     { name: 'SRC', ext: '', data: new Uint8Array(0), isDirectory: true },
     // Files in SRC/ (indices 15+)
     // Note: Large source files (ASM.ASM, ASM2.ASM, SHELL.ASM, EDIT.ASM) excluded to save space
