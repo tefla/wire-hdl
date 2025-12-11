@@ -60,4 +60,5 @@ Port the RISC-V assembler to run natively on the RISC-V emulator, enabling self-
 - [ ] Stage 2 can assemble its own source code
 - [ ] Output matches host assembler output
 - [ ] Development workflow documented
+- [ ] 10+ tests for each stage of assembler
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->

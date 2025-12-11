@@ -52,4 +52,5 @@ Implement a simple bootloader that initializes the system and loads the shell or
 - [ ] Bootloader loads program from disk
 - [ ] Control transfers to loaded program
 - [ ] Boot process completes in < 1 second
+- [ ] 10+ tests for bootloader
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->

@@ -66,4 +66,5 @@ Offset  Size  Description
 - [ ] Can delete files
 - [ ] Shell dir command shows files
 - [ ] Shell can run programs by name
+- [ ] 15+ tests for filesystem operations
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->

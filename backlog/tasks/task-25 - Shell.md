@@ -68,4 +68,5 @@ loop:
 - [ ] External programs can be loaded and run
 - [ ] Programs return to shell on exit
 - [ ] Shell handles errors gracefully
+- [ ] 15+ tests for shell commands and parsing
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->
