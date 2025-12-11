@@ -1,7 +1,7 @@
 ---
 id: task-7.5
 title: 'Storage: Controller and integration tests'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:
