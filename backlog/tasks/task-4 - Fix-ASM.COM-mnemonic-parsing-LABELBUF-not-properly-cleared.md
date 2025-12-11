@@ -5,6 +5,7 @@ status: To Do
 assignee: []
 created_date: '2025-12-09 15:03'
 labels:
+  - 6502
   - assembler
   - asm.com
   - bug

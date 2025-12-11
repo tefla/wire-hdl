@@ -5,6 +5,7 @@ status: To Do
 assignee: []
 created_date: '2025-12-09 13:35'
 labels:
+  - 6502
   - editor
   - terminal
   - foundation

@@ -5,6 +5,7 @@ status: To Do
 assignee: []
 created_date: '2025-12-09 13:34'
 labels:
+  - 6502
   - shell
   - wireos
   - feature

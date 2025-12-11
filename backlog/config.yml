@@ -1,7 +1,7 @@
-project_name: "8506 CPU emulator and OS"
+project_name: "Wire-HDL Monorepo"
 default_status: "To Do"
 statuses: ["To Do", "In Progress", "Done"]
-labels: []
+labels: ["6502", "riscv", "infrastructure"]
 milestones: []
 date_format: yyyy-mm-dd
 max_column_width: 20

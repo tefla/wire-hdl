@@ -6,6 +6,7 @@ assignee: []
 created_date: '2025-12-09 14:54'
 updated_date: '2025-12-09 14:58'
 labels:
+  - 6502
   - forth
   - assembly
   - bootstrap

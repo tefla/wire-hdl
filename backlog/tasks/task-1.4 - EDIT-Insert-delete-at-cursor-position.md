@@ -6,6 +6,7 @@ assignee: []
 created_date: '2025-12-09 13:16'
 updated_date: '2025-12-09 13:18'
 labels:
+  - 6502
   - editor
   - editing
 dependencies:

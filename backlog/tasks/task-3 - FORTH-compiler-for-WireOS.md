@@ -5,6 +5,7 @@ status: To Do
 assignee: []
 created_date: '2025-12-09 14:54'
 labels:
+  - 6502
   - language
   - compiler
   - forth
