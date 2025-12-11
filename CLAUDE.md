@@ -201,3 +201,4 @@ You MUST read the overview resource to understand the complete workflow. The inf
 </CRITICAL_INSTRUCTION>
 
 <!-- BACKLOG.MD MCP GUIDELINES END -->
+- make sure to update the backlog task status to in progress and done as you work on things
