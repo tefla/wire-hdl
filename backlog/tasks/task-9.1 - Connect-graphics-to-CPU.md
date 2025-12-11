@@ -1,7 +1,7 @@
 ---
 id: task-9.1
 title: 'Integration: Connect graphics card to CPU memory bus'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2025-12-11 14:00'
 labels:
