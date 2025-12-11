@@ -1,7 +1,7 @@
 ---
 id: task-31.1
 title: Terminal control and screen management
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 15:00'
 labels:
@@ -44,9 +44,9 @@ Implement terminal control functions using ANSI escape sequences for managing th
 
 ## Acceptance Criteria
 
-- [ ] clearScreen() clears the entire display
-- [ ] moveCursor(row, col) positions cursor correctly
-- [ ] clearLine() erases current line
-- [ ] Cursor can be hidden and shown
-- [ ] Reverse video works for status bar
-- [ ] 5+ tests for terminal control functions
+- [x] clearScreen() clears the entire display
+- [x] moveCursor(row, col) positions cursor correctly
+- [x] clearLine() erases current line
+- [x] Cursor can be hidden and shown
+- [x] Reverse video works for status bar
+- [x] 5+ tests for terminal control functions (7 tests implemented)
