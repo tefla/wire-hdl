@@ -1,7 +1,7 @@
 ---
 id: task-28
 title: Boot disk with shell and commands
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 17:00'
 labels:
@@ -52,23 +52,23 @@ Create a bootable USB disk image containing the shell and basic commands. The sy
 
 ## Subtasks
 
-- [ ] task-28.1: Create bootable disk image with shell
-- [ ] task-28.2: Implement basic commands (cat, ls, run)
-- [ ] task-28.3: Add assembler command
-- [ ] task-28.4: Integrate with frontend UI (Boot button, interaction loop)
-- [ ] task-28.5: Add simple text editor command
+- [x] task-28.1: Create bootable disk image with shell
+- [x] task-28.2: Implement basic commands (cat, ls, run)
+- [x] task-28.3: Add assembler command
+- [x] task-28.4: Integrate with frontend UI (Boot button, interaction loop)
+- [ ] task-28.5: Add simple text editor command (deferred)
 
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE_CRITERIA:BEGIN -->
-- [ ] System boots from USB disk
-- [ ] Shell displays prompt and accepts commands
-- [ ] `help` shows available commands
-- [ ] `ls` lists files on disk
-- [ ] `cat` displays file contents
-- [ ] `run` executes programs
-- [ ] `asm` assembles source files
-- [ ] Frontend has Boot button
-- [ ] Keyboard input works in UI
-- [ ] 15+ tests for boot disk and commands
+- [x] System boots from USB disk
+- [x] Shell displays prompt and accepts commands
+- [x] `help` shows available commands
+- [x] `ls` lists files on disk
+- [x] `cat` displays file contents
+- [x] `run` executes programs
+- [x] `asm` assembles source files
+- [x] Frontend has Boot button
+- [x] Keyboard input works in UI
+- [x] 15+ tests for boot disk and commands (32 tests)
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->

@@ -2,16 +2,19 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { RiscVCpu } from '../emulator/cpu.js';
 import { Screen } from './Screen.js';
 import { KeyModifier } from '../emulator/keyboard.js';
+import { InteractiveSystem } from '../emulator/boot-disk.js';
 
 export function App() {
   const [cpu] = useState(() => new RiscVCpu({ memorySize: 64 * 1024 }));
+  const [system, setSystem] = useState<InteractiveSystem | null>(null);
   const [pc, setPc] = useState(0);
   const [registers, setRegisters] = useState<number[]>([]);
   const [output, setOutput] = useState<string>('');
   const [program, setProgram] = useState<string>('');
-  const [scale, setScale] = useState<1 | 2 | 3>(1);
+  const [scale, setScale] = useState<1 | 2 | 3>(2);
   const [, forceUpdate] = useState({});
   const [keyboardFocused, setKeyboardFocused] = useState(false);
+  const [isBooted, setIsBooted] = useState(false);
   const screenContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -46,8 +49,15 @@ export function App() {
       }
 
       if (ascii !== null) {
-        cpu.keyboard.keyPress(ascii);
-        setOutput(`Key pressed: ${e.key} (0x${ascii.toString(16).padStart(2, '0')})`);
+        // If booted, send to interactive system
+        if (system && isBooted) {
+          system.keyPress(ascii);
+          forceUpdate({}); // Update screen
+          setOutput(system.isRunning() ? 'System running' : 'System halted');
+        } else {
+          cpu.keyboard.keyPress(ascii);
+          setOutput(`Key pressed: ${e.key} (0x${ascii.toString(16).padStart(2, '0')})`);
+        }
       }
     };
 
@@ -68,11 +78,24 @@ export function App() {
         container.removeEventListener('keyup', handleKeyUp);
       };
     }
-  }, [cpu, keyboardFocused]);
+  }, [cpu, keyboardFocused, system, isBooted]);
 
   const updateState = () => {
     setPc(cpu.pc);
     setRegisters(Array.from(cpu.x));
+  };
+
+  const handleBoot = () => {
+    const newSystem = new InteractiveSystem(cpu);
+    newSystem.boot();
+    setSystem(newSystem);
+    setIsBooted(true);
+    setProgram('Wire-RISCV OS\nType "help" for commands');
+    setOutput('System booted. Click screen and type commands.');
+    forceUpdate({});
+
+    // Focus the screen
+    screenContainerRef.current?.focus();
   };
 
   const handleStep = () => {
@@ -82,16 +105,15 @@ export function App() {
 
   const handleReset = () => {
     cpu.reset();
+    setSystem(null);
+    setIsBooted(false);
     setOutput('');
+    setProgram('');
     updateState();
   };
 
   const handleLoadExample = () => {
     // Simple example: add two numbers
-    // addi x1, x0, 5    ; x1 = 5
-    // addi x2, x0, 10   ; x2 = 10
-    // add  x3, x1, x2   ; x3 = x1 + x2 = 15
-    // ecall             ; halt
     const program = new Uint8Array([
       0x93, 0x00, 0x50, 0x00, // addi x1, x0, 5
       0x13, 0x01, 0xa0, 0x00, // addi x2, x0, 10
@@ -99,6 +121,8 @@ export function App() {
       0x73, 0x00, 0x00, 0x00, // ecall
     ]);
     cpu.reset();
+    setSystem(null);
+    setIsBooted(false);
     cpu.loadProgram(program);
     setProgram('addi x1, x0, 5\naddi x2, x0, 10\nadd x3, x1, x2\necall');
     setOutput('Loaded example: add 5 + 10');
@@ -106,57 +130,37 @@ export function App() {
   };
 
   const handleLoadHelloWorld = () => {
-    // Write "HELLO" to the screen (text VRAM at 0x10001000)
-    // Each character takes 2 bytes: char + attribute
     cpu.reset();
+    setSystem(null);
+    setIsBooted(false);
 
-    // Build program to write "HELLO" to VRAM
-    // lui a0, 0x10001  ; a0 = 0x10001000 (VRAM base)
-    // li t0, 'H'       ; load char
-    // sb t0, 0(a0)     ; store char
-    // li t0, 0x0F      ; white on black
-    // sb t0, 1(a0)     ; store attr
-    // ... repeat for E, L, L, O
     const program = new Uint8Array([
-      // lui a0, 0x10001
       0x37, 0x15, 0x00, 0x10,
-
-      // 'H' at position 0
-      0x93, 0x02, 0x80, 0x04, // addi t0, x0, 0x48 ('H')
-      0x23, 0x00, 0x55, 0x00, // sb t0, 0(a0)
-      0x93, 0x02, 0xf0, 0x00, // addi t0, x0, 0x0F (white on black)
-      0xa3, 0x00, 0x55, 0x00, // sb t0, 1(a0)
-
-      // 'E' at position 1
-      0x93, 0x02, 0x50, 0x04, // addi t0, x0, 0x45 ('E')
-      0x23, 0x01, 0x55, 0x00, // sb t0, 2(a0)
-      0x93, 0x02, 0xf0, 0x00, // addi t0, x0, 0x0F
-      0xa3, 0x01, 0x55, 0x00, // sb t0, 3(a0)
-
-      // 'L' at position 2
-      0x93, 0x02, 0xc0, 0x04, // addi t0, x0, 0x4C ('L')
-      0x23, 0x02, 0x55, 0x00, // sb t0, 4(a0)
-      0x93, 0x02, 0xf0, 0x00, // addi t0, x0, 0x0F
-      0xa3, 0x02, 0x55, 0x00, // sb t0, 5(a0)
-
-      // 'L' at position 3
-      0x93, 0x02, 0xc0, 0x04, // addi t0, x0, 0x4C ('L')
-      0x23, 0x03, 0x55, 0x00, // sb t0, 6(a0)
-      0x93, 0x02, 0xf0, 0x00, // addi t0, x0, 0x0F
-      0xa3, 0x03, 0x55, 0x00, // sb t0, 7(a0)
-
-      // 'O' at position 4
-      0x93, 0x02, 0xf0, 0x04, // addi t0, x0, 0x4F ('O')
-      0x23, 0x04, 0x55, 0x00, // sb t0, 8(a0)
-      0x93, 0x02, 0xf0, 0x00, // addi t0, x0, 0x0F
-      0xa3, 0x04, 0x55, 0x00, // sb t0, 9(a0)
-
-      // ecall (halt)
+      0x93, 0x02, 0x80, 0x04,
+      0x23, 0x00, 0x55, 0x00,
+      0x93, 0x02, 0xf0, 0x00,
+      0xa3, 0x00, 0x55, 0x00,
+      0x93, 0x02, 0x50, 0x04,
+      0x23, 0x01, 0x55, 0x00,
+      0x93, 0x02, 0xf0, 0x00,
+      0xa3, 0x01, 0x55, 0x00,
+      0x93, 0x02, 0xc0, 0x04,
+      0x23, 0x02, 0x55, 0x00,
+      0x93, 0x02, 0xf0, 0x00,
+      0xa3, 0x02, 0x55, 0x00,
+      0x93, 0x02, 0xc0, 0x04,
+      0x23, 0x03, 0x55, 0x00,
+      0x93, 0x02, 0xf0, 0x00,
+      0xa3, 0x03, 0x55, 0x00,
+      0x93, 0x02, 0xf0, 0x04,
+      0x23, 0x04, 0x55, 0x00,
+      0x93, 0x02, 0xf0, 0x00,
+      0xa3, 0x04, 0x55, 0x00,
       0x73, 0x00, 0x00, 0x00,
     ]);
 
     cpu.loadProgram(program);
-    setProgram('lui a0, 0x10001\\n; Write HELLO to VRAM\\n... (graphics demo)');
+    setProgram('lui a0, 0x10001\n; Write HELLO to VRAM\n... (graphics demo)');
     setOutput('Loaded Hello World example. Press Run!');
     updateState();
   };
@@ -165,7 +169,7 @@ export function App() {
     const cycles = cpu.run(10000);
     setOutput(`Executed ${cycles} cycles. ${cpu.halted ? 'CPU halted.' : ''}`);
     updateState();
-    forceUpdate({}); // Trigger screen re-render
+    forceUpdate({});
   };
 
   const handleScaleChange = useCallback((newScale: 1 | 2 | 3) => {
@@ -175,20 +179,30 @@ export function App() {
   return (
     <div style={{ fontFamily: 'monospace', padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
       <h1>Wire-RISCV Emulator</h1>
-      <p style={{ color: '#666' }}>RISC-V RV32I CPU Emulator with Graphics</p>
+      <p style={{ color: '#666' }}>RISC-V RV32I CPU Emulator with Graphics and Shell</p>
 
       {/* Controls */}
       <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          onClick={handleBoot}
+          style={{
+            backgroundColor: isBooted ? '#2a2' : '#4a9eff',
+            color: '#fff',
+            fontWeight: 'bold',
+          }}
+        >
+          {isBooted ? '✓ Booted' : '🚀 Boot'}
+        </button>
         <button onClick={handleLoadExample}>
           Load Math
         </button>
         <button onClick={handleLoadHelloWorld}>
           Load Hello
         </button>
-        <button onClick={handleStep}>
+        <button onClick={handleStep} disabled={isBooted}>
           Step
         </button>
-        <button onClick={handleRun}>
+        <button onClick={handleRun} disabled={isBooted}>
           Run
         </button>
         <button onClick={handleReset}>Reset</button>
@@ -220,6 +234,7 @@ export function App() {
         >
           <h3 style={{ margin: '0 0 10px 0' }}>
             Screen {keyboardFocused && <span style={{ color: '#4a9eff', fontSize: '12px' }}>(keyboard active)</span>}
+            {isBooted && <span style={{ color: '#2a2', fontSize: '12px', marginLeft: '10px' }}>OS Running</span>}
           </h3>
           <Screen
             gpu={cpu.gpu}
@@ -229,7 +244,9 @@ export function App() {
             style={{ border: '2px solid #333', cursor: 'text' }}
           />
           <p style={{ fontSize: '11px', color: '#666', margin: '5px 0 0 0' }}>
-            Click screen to enable keyboard input
+            {isBooted
+              ? 'Click screen and type commands (help, ls, cat, echo, cls, exit)'
+              : 'Click screen to enable keyboard input'}
           </p>
         </div>
 
@@ -296,9 +313,8 @@ export function App() {
 
       <div style={{ marginTop: '20px', color: '#666', fontSize: '12px' }}>
         <p>
-          RV32I emulator with memory-mapped graphics and keyboard. Click &quot;Load Hello&quot; and &quot;Run&quot; to see text output.
-          Graphics at 0x10000000+, Text VRAM at 0x10001000 (80x25), Keyboard at 0x30000000 (STATUS/DATA/MODIFIER).
-          Click the screen to enable keyboard input.
+          <strong>Boot</strong> to start the OS with shell. Commands: help, ls, cat, echo, cls, mem, exit.
+          Or load example programs and use Step/Run for manual execution.
         </p>
       </div>
     </div>
