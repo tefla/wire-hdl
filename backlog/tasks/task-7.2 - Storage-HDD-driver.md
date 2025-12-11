@@ -1,7 +1,7 @@
 ---
 id: task-7.2
 title: 'Storage: HDD driver with tests'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:
