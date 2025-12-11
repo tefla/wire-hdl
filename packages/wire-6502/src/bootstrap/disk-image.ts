@@ -286,6 +286,7 @@ export function createFloppyDisk(): Uint8Array[] {
     // Files in SRC/ (indices 15+)
     // ASM.ASM included for self-hosting demo (75KB)
     { name: 'ASM', ext: 'ASM', data: textToBytes(ASM_ASM), parentIndex: SRC_DIR_INDEX },
+    { name: 'ASM2', ext: 'ASM', data: textToBytes(ASM2_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'ASM0', ext: 'ASM', data: textToBytes(ASM0_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'BOOTLOAD', ext: 'ASM', data: textToBytes(BOOTLOAD_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'HEXLOAD', ext: 'ASM', data: textToBytes(HEXLOAD_ASM), parentIndex: SRC_DIR_INDEX },

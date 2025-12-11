@@ -69,6 +69,9 @@ export class NativeAssembler {
   private macros: Map<string, MacroDefinition> = new Map();
   private pendingLabels: Array<{ offset: number; label: string; type: 'J' | 'B'; line: number }> = [];
   private output: number[] = [];
+  private textOutput: number[] = [];
+  private dataOutput: number[] = [];
+  private currentSection: 'text' | 'data' = 'text';
   private currentLine: number = 0;
   private sourceLines: string[] = [];
 
@@ -86,6 +89,9 @@ export class NativeAssembler {
     this.macros.clear();
     this.pendingLabels = [];
     this.output = [];
+    this.textOutput = [];
+    this.dataOutput = [];
+    this.currentSection = 'text';
     this.currentLine = 0;
 
     this.sourceLines = source.split('\n');
@@ -99,6 +105,17 @@ export class NativeAssembler {
       this.currentLine = i + 1;
       this.processLine(this.sourceLines[i]);
     }
+
+    // Concatenate data + text sections
+    this.output = [...this.dataOutput, ...this.textOutput];
+
+    // Adjust text labels by data section size
+    const dataSize = this.dataOutput.length;
+    const adjustedLabels = new Map<string, number>();
+    for (const [label, offset] of this.labels) {
+      adjustedLabels.set(label, offset);
+    }
+    this.labels = adjustedLabels;
 
     // Second pass: resolve pending labels
     for (const pending of this.pendingLabels) {
@@ -204,7 +221,11 @@ export class NativeAssembler {
     // Check for label
     const labelMatch = line.match(/^(\w+):\s*(.*)/);
     if (labelMatch) {
-      this.labels.set(labelMatch[1], this.output.length);
+      // Store label offset in the current section
+      const offset = this.currentSection === 'data'
+        ? this.dataOutput.length
+        : this.dataOutput.length + this.textOutput.length;
+      this.labels.set(labelMatch[1], offset);
       line = labelMatch[2].trim();
       if (!line) {
         return;
@@ -222,6 +243,20 @@ export class NativeAssembler {
   }
 
   /**
+   * Get the current output buffer based on section
+   */
+  private getCurrentOutput(): number[] {
+    return this.currentSection === 'data' ? this.dataOutput : this.textOutput;
+  }
+
+  /**
+   * Get current position in final output (accounting for sections)
+   */
+  private getCurrentPosition(): number {
+    return this.dataOutput.length + this.textOutput.length;
+  }
+
+  /**
    * Process directive
    */
   private processDirective(line: string): void {
@@ -234,11 +269,19 @@ export class NativeAssembler {
     const args = match[2] || '';
 
     switch (directive) {
+      case '.text':
+        this.currentSection = 'text';
+        break;
+
+      case '.data':
+        this.currentSection = 'data';
+        break;
+
       case '.byte': {
         // Support comma-separated values
         const values = args.split(',').map((v) => v.trim());
         for (const val of values) {
-          this.output.push(this.parseNumber(val) & 0xFF);
+          this.getCurrentOutput().push(this.parseNumber(val) & 0xFF);
         }
         break;
       }
@@ -267,10 +310,10 @@ export class NativeAssembler {
         // Process escape sequences
         const str = this.processEscapeSequences(match[1]);
         for (const char of str) {
-          this.output.push(char.charCodeAt(0));
+          this.getCurrentOutput().push(char.charCodeAt(0));
         }
         if (shouldNullTerminate) {
-          this.output.push(0);
+          this.getCurrentOutput().push(0);
         }
         break;
       }
@@ -278,7 +321,7 @@ export class NativeAssembler {
       case '.space': {
         const size = this.parseNumber(args);
         for (let i = 0; i < size; i++) {
-          this.output.push(0);
+          this.getCurrentOutput().push(0);
         }
         break;
       }
@@ -438,12 +481,12 @@ export class NativeAssembler {
 
     // Check if target is a label
     if (this.labels.has(target)) {
-      const imm = this.labels.get(target)! - this.output.length;
+      const imm = this.labels.get(target)! - this.getCurrentPosition();
       this.emitWord(this.encodeJAL(rd, imm));
     } else if (/^[a-zA-Z_]\w*$/.test(target)) {
       // Forward reference
       this.pendingLabels.push({
-        offset: this.output.length,
+        offset: this.getCurrentPosition(),
         label: target,
         type: 'J',
         line: this.currentLine,
@@ -492,12 +535,12 @@ export class NativeAssembler {
 
     // Check if target is a label
     if (this.labels.has(target)) {
-      const imm = this.labels.get(target)! - this.output.length;
+      const imm = this.labels.get(target)! - this.getCurrentPosition();
       this.emitWord(this.encodeBranch(rs1, rs2, imm, funct3));
     } else if (/^[a-zA-Z_]\w*$/.test(target)) {
       // Forward reference
       this.pendingLabels.push({
-        offset: this.output.length,
+        offset: this.getCurrentPosition(),
         label: target,
         type: 'B',
         line: this.currentLine,
@@ -836,10 +879,11 @@ export class NativeAssembler {
   }
 
   private emitWord(value: number): void {
-    this.output.push(value & 0xFF);
-    this.output.push((value >> 8) & 0xFF);
-    this.output.push((value >> 16) & 0xFF);
-    this.output.push((value >> 24) & 0xFF);
+    const output = this.getCurrentOutput();
+    output.push(value & 0xFF);
+    output.push((value >> 8) & 0xFF);
+    output.push((value >> 16) & 0xFF);
+    output.push((value >> 24) & 0xFF);
   }
 
   private patchBranch(offset: number, imm: number, type: 'J' | 'B'): void {

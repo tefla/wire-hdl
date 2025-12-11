@@ -175,7 +175,7 @@ MAIN:
         STA FILESIZE+1
         TAX
         PLA
-        JSR PRINT_HEX16
+        JSR PR_HEX16
         LDA #<MSG_BYTES
         LDX #>MSG_BYTES
         JSR PRINT_STR
@@ -405,7 +405,7 @@ PL_DONE:
 PARSE_INSTR:
         ; Mnemonic is already in MNEMBUF
         JSR LOOKUP_MNEM
-        BCS PI_BAD_MNEM
+        BCS PI_BADMN
 
         ; Get operand and addressing mode
         JSR SKIP_SPACE
@@ -413,19 +413,19 @@ PARSE_INSTR:
 
         ; Look up opcode for mnemonic + addressing mode
         JSR LOOKUP_OPCODE
-        BCS PI_BAD_MODE
+        BCS PI_BADMD
 
         ; Emit instruction
         JSR EMIT_INSTR
         RTS
 
-PI_BAD_MNEM:
+PI_BADMN:
         LDA #<ERR_MNEM
         LDX #>ERR_MNEM
         JSR PRINT_ERROR
         RTS
 
-PI_BAD_MODE:
+PI_BADMD:
         LDA #<ERR_MODE
         LDX #>ERR_MODE
         JSR PRINT_ERROR
@@ -483,17 +483,17 @@ PO_NOT_ACC:
         ; Check for immediate (#)
         LDA (SRCPTR),Y
         CMP #'#'
-        BNE PO_NOT_IMM
+        BNE PO_NOTIM
         INY
         JSR PARSE_EXPR
         LDA #AM_IMM
         STA ADDRMODE
         RTS
 
-PO_NOT_IMM:
+PO_NOTIM:
         ; Check for indirect (starts with ()
         CMP #'('
-        BNE PO_NOT_IND
+        BNE PO_NOTIN
         INY                 ; Skip (
         JSR PARSE_EXPR
         LDA (SRCPTR),Y
@@ -545,7 +545,7 @@ PO_IND_ERR:
         JSR PRINT_ERROR
         RTS
 
-PO_NOT_IND:
+PO_NOTIN:
         ; Regular address expression
         JSR PARSE_EXPR
 
@@ -875,13 +875,13 @@ PL_DIRECTIVE:
         ; Check for .ORG
         LDA LABELBUF
         CMP #'O'
-        BNE DIR_NOT_ORG
+        BNE DIR_NORG
         LDA LABELBUF+1
         CMP #'R'
-        BNE DIR_NOT_ORG
+        BNE DIR_NORG
         LDA LABELBUF+2
         CMP #'G'
-        BNE DIR_NOT_ORG
+        BNE DIR_NORG
         JSR SKIP_SPACE
         JSR PARSE_EXPR
         LDA OPERAND
@@ -890,11 +890,11 @@ PL_DIRECTIVE:
         STA CURPC+1
         JMP PL_DONE
 
-DIR_NOT_ORG:
+DIR_NORG:
         ; Check for .DB / .BYTE
         LDA LABELBUF
         CMP #'D'
-        BNE DIR_NOT_DB
+        BNE DIR_NDB
         LDA LABELBUF+1
         CMP #'B'
         BEQ DIR_DB
@@ -902,7 +902,7 @@ DIR_NOT_ORG:
         BEQ DIR_DW
         CMP #'S'
         BEQ DIR_DS
-        JMP DIR_NOT_DB
+        JMP DIR_NDB
 
 DIR_DB:
         JSR SKIP_SPACE
@@ -945,19 +945,19 @@ DIR_DS:
 DIR_DS_LOOP:
         LDA OPERAND
         ORA OPERAND+1
-        BEQ DIR_DS_DONE
+        BEQ DIR_DSDN
         LDA #0
         JSR EMIT_BYTE
         LDA OPERAND
-        BNE DIR_DS_DEC
+        BNE DIR_DSDC
         DEC OPERAND+1
-DIR_DS_DEC:
+DIR_DSDC:
         DEC OPERAND
         JMP DIR_DS_LOOP
-DIR_DS_DONE:
+DIR_DSDN:
         JMP PL_DONE
 
-DIR_NOT_DB:
+DIR_NDB:
         ; Check for .BYTE
         LDA LABELBUF
         CMP #'B'
@@ -1229,33 +1229,33 @@ GET_TOKEN:
         CMP #'#'
         BEQ GT_HASH_JMP
         CMP #'('
-        BEQ GT_LPAREN_JMP
+        BEQ GT_LP_JM
         CMP #')'
-        BEQ GT_RPAREN_JMP
+        BEQ GT_RP_JM
         CMP #','
-        BEQ GT_COMMA_JMP
+        BEQ GT_COM_J
         CMP #'+'
         BEQ GT_PLUS_JMP
         CMP #'-'
-        BEQ GT_MINUS_JMP
+        BEQ GT_MIN_J
         CMP #'='
-        BEQ GT_EQUALS_JMP
+        BEQ GT_EQ_JM
         CMP #'.'
         BEQ GT_DOT_JMP
         CMP #':'
-        BEQ GT_COLON_JMP
+        BEQ GT_COL_J
         CMP #'<'
         BEQ GT_LT_JMP
         CMP #'>'
         BEQ GT_GT_JMP
         CMP #';'
-        BEQ GT_COMMENT_JMP
+        BEQ GT_CMT_J
         CMP #'$'
-        BEQ GT_NUMBER_JMP
+        BEQ GT_NUM_J
         CMP #'0'
         BCC GT_LABEL
         CMP #':'
-        BCC GT_NUMBER_JMP
+        BCC GT_NUM_J
         JMP GT_LABEL        ; Fall through to label
 
 ; Trampolines for far branches
@@ -1265,30 +1265,30 @@ GT_NL_JMP:
         JMP GT_NL
 GT_HASH_JMP:
         JMP GT_HASH
-GT_LPAREN_JMP:
-        JMP GT_LPAREN
-GT_RPAREN_JMP:
-        JMP GT_RPAREN
-GT_COMMA_JMP:
-        JMP GT_COMMA
+GT_LP_JM:
+        JMP GT_LPAR
+GT_RP_JM:
+        JMP GT_RPAR
+GT_COM_J:
+        JMP GT_COMA
 GT_PLUS_JMP:
         JMP GT_PLUS
-GT_MINUS_JMP:
-        JMP GT_MINUS
-GT_EQUALS_JMP:
-        JMP GT_EQUALS
+GT_MIN_J:
+        JMP GT_MINU
+GT_EQ_JM:
+        JMP GT_EQL
 GT_DOT_JMP:
         JMP GT_DOT
-GT_COLON_JMP:
-        JMP GT_COLON
+GT_COL_J:
+        JMP GT_CLN
 GT_LT_JMP:
         JMP GT_LT
 GT_GT_JMP:
         JMP GT_GT
-GT_COMMENT_JMP:
-        JMP GT_COMMENT
-GT_NUMBER_JMP:
-        JMP GT_NUMBER
+GT_CMT_J:
+        JMP GT_CMNT
+GT_NUM_J:
+        JMP GT_NUMB
 
 GT_LABEL:
         ; Identifier - could be label or mnemonic
@@ -1314,17 +1314,17 @@ GT_NL:
         STA TOKTYPE
         INY
         RTS
-GT_COMMENT:
+GT_CMNT:
         ; Skip to end of line, then return NEWLINE token
-GT_COMMENT_SKIP:
+GT_CMTSK:
         INY
         LDA (SRCPTR),Y
-        BEQ GT_COMMENT_DONE     ; End of file
+        BEQ GT_CMTDN     ; End of file
         CMP #$0A                ; LF
-        BEQ GT_COMMENT_DONE
+        BEQ GT_CMTDN
         CMP #$0D                ; CR
-        BNE GT_COMMENT_SKIP
-GT_COMMENT_DONE:
+        BNE GT_CMTSK
+GT_CMTDN:
         LDA #TOK_NEWLINE
         STA TOKTYPE
         RTS
@@ -1333,17 +1333,17 @@ GT_HASH:
         STA TOKTYPE
         INY
         RTS
-GT_LPAREN:
+GT_LPAR:
         LDA #TOK_LPAREN
         STA TOKTYPE
         INY
         RTS
-GT_RPAREN:
+GT_RPAR:
         LDA #TOK_RPAREN
         STA TOKTYPE
         INY
         RTS
-GT_COMMA:
+GT_COMA:
         LDA #TOK_COMMA
         STA TOKTYPE
         INY
@@ -1353,12 +1353,12 @@ GT_PLUS:
         STA TOKTYPE
         INY
         RTS
-GT_MINUS:
+GT_MINU:
         LDA #TOK_MINUS
         STA TOKTYPE
         INY
         RTS
-GT_EQUALS:
+GT_EQL:
         LDA #TOK_EQUALS
         STA TOKTYPE
         INY
@@ -1368,7 +1368,7 @@ GT_DOT:
         STA TOKTYPE
         INY
         RTS
-GT_COLON:
+GT_CLN:
         LDA #TOK_COLON
         STA TOKTYPE
         INY
@@ -1383,7 +1383,7 @@ GT_GT:
         STA TOKTYPE
         INY
         RTS
-GT_NUMBER:
+GT_NUMB:
         LDA #TOK_NUMBER
         STA TOKTYPE
         RTS
@@ -1760,16 +1760,16 @@ PS_LOOP:
 PS_DONE:
         RTS
 
-PRINT_HEX16:
+PR_HEX16:
         ; Print 16-bit value in A (low) and X (high)
         PHA
         TXA
-        JSR PRINT_HEX8
+        JSR PR_HEX8
         PLA
-        JSR PRINT_HEX8
+        JSR PR_HEX8
         RTS
 
-PRINT_HEX8:
+PR_HEX8:
         PHA
         LSR A
         LSR A
@@ -1821,7 +1821,7 @@ PRINT_ERROR:
         ; Print line number
         LDA LINENUM
         LDX LINENUM+1
-        JSR PRINT_HEX16
+        JSR PR_HEX16
 
         JSR NEWLINE
         RTS
@@ -2017,32 +2017,32 @@ ERR_SYMFUL:
 LOAD_FILE:
         ; Skip the command name to find the filename argument
         LDX #0
-LF_SKIP_CMD:
+LF_SKCMD:
         LDA CMD_BUF,X
-        BEQ LF_NO_ARG_JMP   ; End of string, no argument
+        BEQ LF_NA_JM   ; End of string, no argument
         CMP #$20            ; Space?
         BEQ LF_FOUND_SPACE
         INX
-        BNE LF_SKIP_CMD
-LF_NO_ARG_JMP:
-        JMP LF_NO_ARG       ; Trampoline for far branch
-LF_NOT_FOUND_JMP:
-        JMP LF_NOT_FOUND    ; Trampoline for far branch
-LF_READ_ERR_JMP:
-        JMP LF_READ_ERROR   ; Trampoline for far branch
-LF_NEXT_ENTRY_JMP:
-        JMP LF_NEXT_ENTRY   ; Trampoline for far branch
+        BNE LF_SKCMD
+LF_NA_JM:
+        JMP LF_NOARG       ; Trampoline for far branch
+LF_NF_JM:
+        JMP LF_NOTFD    ; Trampoline for far branch
+LF_RE_JM:
+        JMP LF_RDERR   ; Trampoline for far branch
+LF_NE_JM:
+        JMP LF_NXENT   ; Trampoline for far branch
 
 LF_FOUND_SPACE:
         ; Skip spaces to get to filename
         INX
-LF_SKIP_SPACES:
+LF_SKSPC:
         LDA CMD_BUF,X
-        BEQ LF_NO_ARG_JMP   ; End of string
+        BEQ LF_NA_JM   ; End of string
         CMP #$20            ; Space?
         BNE LF_GOT_ARG
         INX
-        BNE LF_SKIP_SPACES
+        BNE LF_SKSPC
 
 LF_GOT_ARG:
         ; X now points to filename in CMD_BUF
@@ -2067,7 +2067,7 @@ LF_SECTOR:
         LDA #>DIR_BUF
         STA $33
         JSR DISK_READ
-        BCS LF_NOT_FOUND_JMP
+        BCS LF_NF_JM
 
         ; Search entries in this sector
         LDA #<DIR_BUF
@@ -2081,18 +2081,18 @@ LF_SEARCH:
         LDY #0
         LDA (SYMPTR),Y
         CMP #1
-        BNE LF_NEXT_ENTRY_JMP
+        BNE LF_NE_JM
 
         ; Check parent directory matches current directory
         ; Parent index is at offset $15-$16 in directory entry
         LDY #$15
         LDA (SYMPTR),Y
         CMP CUR_DIR_LO
-        BNE LF_NEXT_ENTRY_JMP
+        BNE LF_NE_JM
         INY
         LDA (SYMPTR),Y
         CMP CUR_DIR_HI
-        BNE LF_NEXT_ENTRY_JMP
+        BNE LF_NE_JM
 
         ; Compare filename
         LDX TMPPTR          ; Get filename offset
@@ -2117,7 +2117,7 @@ LF_CMP_LOOP:
 
         ; Compare
         CMP CMD_BUF,X
-        BNE LF_NEXT_ENTRY_JMP ; No match
+        BNE LF_NE_JM ; No match
 
         INX
         INY
@@ -2152,15 +2152,15 @@ LF_CMP_END:
         ; Restore filename offset
         PLA
         TAX
-LF_PRINT_NAME:
+LF_PRNAM:
         LDA CMD_BUF,X
-        BEQ LF_PRINT_DONE
+        BEQ LF_PRDON
         CMP #$20
-        BEQ LF_PRINT_DONE
+        BEQ LF_PRDON
         JSR PUTCHAR
         INX
-        BNE LF_PRINT_NAME
-LF_PRINT_DONE:
+        BNE LF_PRNAM
+LF_PRDON:
         JSR NEWLINE
 
         ; Load file into SRC_BUF
@@ -2196,7 +2196,7 @@ LF_LOAD_LOOP:
         LDA SRCPTR+1
         STA $33
         JSR DISK_READ
-        BCS LF_READ_ERROR
+        BCS LF_RDERR
 
         ; Advance to next sector
         INC FILESEC
@@ -2228,7 +2228,7 @@ LF_NO_CARRY:
         CLC                 ; Success
         RTS
 
-LF_NEXT_ENTRY:
+LF_NXENT:
         ; Move to next entry (+32 bytes)
         CLC
         LDA SYMPTR
@@ -2243,31 +2243,31 @@ LF_NEXT_ENTRY:
         ; Check if high byte has increased by 2 (512 bytes / 256 = 2 pages)
         INX
         CPX #16
-        BEQ LF_NEXT_SECTOR_CHECK
+        BEQ LF_NXSEC
         JMP LF_SEARCH
 
-LF_NEXT_SECTOR_CHECK:
+LF_NXSEC:
         ; Next sector
         INC DIRSEC          ; Next sector number
         DEC CHARTMP         ; Remaining sectors
-        BEQ LF_NOT_FOUND
+        BEQ LF_NOTFD
         JMP LF_SECTOR
 
-LF_NO_ARG:
+LF_NOARG:
         LDA #<MSG_USAGE
         LDX #>MSG_USAGE
         JSR PRINT_STR
         SEC                 ; Error
         RTS
 
-LF_NOT_FOUND:
+LF_NOTFD:
         LDA #<MSG_NOTFOUND
         LDX #>MSG_NOTFOUND
         JSR PRINT_STR
         SEC                 ; Error
         RTS
 
-LF_READ_ERROR:
+LF_RDERR:
         LDA #<MSG_READERR
         LDX #>MSG_READERR
         JSR PRINT_STR
@@ -2297,7 +2297,7 @@ SAVE_FILE:
         ; Build output filename - copy name portion (up to 8 chars)
         LDX FNAMEOFF        ; Source filename offset in CMD_BUF (preserved from LOAD_FILE)
         LDY #0              ; Output filename index
-SF_COPY_NAME:
+SF_CPNAM:
         LDA CMD_BUF,X
         BEQ SF_PAD_NAME     ; End of string
         CMP #$20            ; Space
@@ -2310,7 +2310,7 @@ SF_COPY_NAME:
         INX
         INY
         CPY #8
-        BNE SF_COPY_NAME
+        BNE SF_CPNAM
 
 SF_PAD_NAME:
         ; Pad name with spaces to 8 chars
@@ -2347,7 +2347,7 @@ SF_ADD_EXT:
         LDA #DIR_SECTS
         STA CHARTMP         ; Sectors remaining
 
-SF_DIR_SECTOR:
+SF_DRSEC:
         ; Read directory sector
         LDA DIRSEC
         STA $30
@@ -2359,7 +2359,7 @@ SF_DIR_SECTOR:
         STA $33
         JSR DISK_READ
         BCC SF_DIR_OK
-        JMP SF_WRITE_ERR
+        JMP SF_WRERR
 SF_DIR_OK:
 
         ; Search entries in this sector
@@ -2369,7 +2369,7 @@ SF_DIR_OK:
         STA SYMPTR+1
         LDX #0              ; Entry counter (0-15)
 
-SF_DIR_SEARCH:
+SF_DRSCH:
         ; Check entry status
         LDY #0
         LDA (SYMPTR),Y
@@ -2411,12 +2411,12 @@ SF_DIR_NEXT:
 
         INX
         CPX #16             ; 16 entries per sector
-        BNE SF_DIR_SEARCH
+        BNE SF_DRSCH
 
         ; Next directory sector
         INC DIRSEC
         DEC CHARTMP
-        BNE SF_DIR_SECTOR
+        BNE SF_DRSEC
 
         ; No free entry found - print error
         LDA #<MSG_DIRFULL
@@ -2466,7 +2466,7 @@ SF_FIND_SECTOR:
         STA $33
         JSR DISK_READ
         BCC SF_BMP_OK
-        JMP SF_WRITE_ERR
+        JMP SF_WRERR
 SF_BMP_OK:
 
         ; Search for free bit starting at sector 20
@@ -2541,33 +2541,33 @@ SF_GOT_SEC:
         LDA #1
 SF_SHIFT_MASK:
         CPX #0
-        BEQ SF_MARK_BITS
+        BEQ SF_MKBIT
         ASL A
         DEX
         JMP SF_SHIFT_MASK
 
-SF_MARK_BITS:
+SF_MKBIT:
         STA CHARTMP         ; Bit mask for first sector
         LDX LOBYTE          ; Sector count
 
-SF_MARK_LOOP:
+SF_MKLOP:
         LDA SCRATCH+16,Y
         ORA CHARTMP
         STA SCRATCH+16,Y
 
         DEX
-        BEQ SF_WRITE_BITMAP
+        BEQ SF_WRBMP
 
         ; Next bit
         ASL CHARTMP
-        BNE SF_MARK_LOOP
+        BNE SF_MKLOP
         ; Next byte
         LDA #1
         STA CHARTMP
         INY
-        JMP SF_MARK_LOOP
+        JMP SF_MKLOP
 
-SF_WRITE_BITMAP:
+SF_WRBMP:
         ; Write bitmap back to disk
         LDA #4
         STA $30
@@ -2579,7 +2579,7 @@ SF_WRITE_BITMAP:
         STA $33
         JSR DISK_WRITE
         BCC SF_BMP_WR_OK
-        JMP SF_WRITE_ERR
+        JMP SF_WRERR
 SF_BMP_WR_OK:
 
         ; Write output data to disk
@@ -2593,17 +2593,17 @@ SF_BMP_WR_OK:
         STA $33
 
         LDX LOBYTE          ; Sector count
-SF_DATA_LOOP:
+SF_DTLOP:
         JSR DISK_WRITE
-        BCC SF_DATA_WR_OK
-        JMP SF_WRITE_ERR
-SF_DATA_WR_OK:
+        BCC SF_DTWOK
+        JMP SF_WRERR
+SF_DTWOK:
 
         ; Next sector
         INC $30
-        BNE SF_DATA_NO_CARRY
+        BNE SF_DTNOC
         INC $31
-SF_DATA_NO_CARRY:
+SF_DTNOC:
 
         ; Advance buffer by 512 bytes
         CLC
@@ -2612,7 +2612,7 @@ SF_DATA_NO_CARRY:
         STA $33
 
         DEX
-        BNE SF_DATA_LOOP
+        BNE SF_DTLOP
 
         ; Update directory entry
         ; SYMPTR still points to the entry
@@ -2622,12 +2622,12 @@ SF_DATA_NO_CARRY:
 
         ; Copy filename (11 bytes: 8 name + 3 ext)
         LDY #0
-SF_COPY_FNAME:
+SF_CPFNM:
         LDA SCRATCH,Y
         INY
         STA (SYMPTR),Y
         CPY #11
-        BNE SF_COPY_FNAME
+        BNE SF_CPFNM
 
         ; Start sector at offset $0C
         LDY #$0C
@@ -2682,7 +2682,7 @@ SF_COPY_FNAME:
         STA $33
         JSR DISK_WRITE
         BCC SF_DIR_WR_OK
-        JMP SF_WRITE_ERR
+        JMP SF_WRERR
 SF_DIR_WR_OK:
 
         ; Print "Saved"
@@ -2693,7 +2693,7 @@ SF_DIR_WR_OK:
         CLC
         RTS
 
-SF_WRITE_ERR:
+SF_WRERR:
         LDA #<MSG_WRITEERR
         LDX #>MSG_WRITEERR
         JSR PRINT_STR

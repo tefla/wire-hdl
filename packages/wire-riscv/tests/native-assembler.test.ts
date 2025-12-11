@@ -716,6 +716,76 @@ BASE EQU 0x1000
       expect(readWord(binary, 0)).toBe(0x01100537);
     });
   });
+
+  describe('Section directives (.text and .data)', () => {
+    it('should handle .text directive', () => {
+      const source = `
+        .text
+        ADDI a0, zero, 10
+      `;
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 10 = 0x00A00513
+      expect(readWord(binary, 0)).toBe(0x00A00513);
+    });
+
+    it('should handle .data directive with .text', () => {
+      const source = `
+        .data
+        myData: .word 0x12345678
+
+        .text
+        LUI a0, 0x1000
+      `;
+      const binary = assembler.assemble(source);
+
+      // Data should come first: 0x12345678
+      expect(readWord(binary, 0)).toBe(0x12345678);
+      // Then code: LUI a0, 0x1000 = 0x01000537
+      expect(readWord(binary, 4)).toBe(0x01000537);
+    });
+
+    it('should allow multiple .text and .data sections', () => {
+      const source = `
+        .text
+        ADDI a0, zero, 1
+
+        .data
+        val1: .word 100
+
+        .text
+        ADDI a1, zero, 2
+
+        .data
+        val2: .word 200
+      `;
+      const binary = assembler.assemble(source);
+
+      // Data section: 100, 200
+      expect(readWord(binary, 0)).toBe(100);
+      expect(readWord(binary, 4)).toBe(200);
+      // Text section: ADDI a0, zero, 1 and ADDI a1, zero, 2
+      expect(readWord(binary, 8)).toBe(0x00100513); // ADDI a0, zero, 1
+      expect(readWord(binary, 12)).toBe(0x00200593); // ADDI a1, zero, 2
+    });
+
+    it('should handle labels in .data section', () => {
+      const source = `
+        .data
+        message: .string "Hi"
+
+        .text
+        LUI a0, 0
+        LBU a1, 0(a0)
+      `;
+      const binary = assembler.assemble(source);
+
+      // Data: "Hi\\0"
+      expect(binary[0]).toBe(0x48); // 'H'
+      expect(binary[1]).toBe(0x69); // 'i'
+      expect(binary[2]).toBe(0); // null terminator
+    });
+  });
 });
 
 /**

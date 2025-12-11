@@ -1014,3 +1014,57 @@ describe('ASM.COM Self-Hosting (task-11.5)', () => {
     expect(computer.output).toContain('Assembly complete');
   }, 120000);  // 2 minute timeout
 });
+
+describe('AS.COM Bootstrap Chain (task-8.1)', () => {
+  /**
+   * Test that AS.COM can assemble asm2.asm (bootstrap chain)
+   * ASM2.ASM is in the SRC directory on the disk image
+   */
+  it('should assemble asm2.asm from SRC directory', async () => {
+    const computer = new TestComputer();
+
+    // Create and insert floppy (has ASM2.ASM in SRC directory)
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    computer.runUntilOutput('/>', 100000);
+    computer.clearOutput();
+
+    // Install files
+    computer.sendLine('INSTALL');
+    computer.runUntilOutput('Done', 500000);
+    computer.clearOutput();
+
+    // CD to SRC directory
+    computer.sendLine('CD SRC');
+    computer.runUntilOutput('/SRC/', 100000);
+    computer.clearOutput();
+
+    // Assemble ASM2.ASM
+    computer.sendLine('AS ASM2.ASM');
+
+    // Run until complete or error
+    for (let i = 0; i < 100000000; i++) {
+      computer.run(1000);
+      if (computer.output.includes('Error') ||
+          computer.output.includes('Assembly complete') ||
+          computer.output.includes('not found')) {
+        break;
+      }
+    }
+
+    console.log('AS ASM2.ASM output (last 500 chars):', computer.output.slice(-500));
+
+    expect(computer.output).not.toContain('not found');
+    expect(computer.output).not.toContain('Error');
+    expect(computer.output).toContain('Assembly complete');
+  }, 120000);
+});
