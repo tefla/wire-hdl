@@ -1,10 +1,10 @@
 ---
 id: task-11.5
 title: Add string literal support to .DB directive in asm.asm
-status: In Progress
+status: Done
 assignee: []
 created_date: '2025-12-11 11:36'
-updated_date: '2025-12-11 11:36'
+updated_date: '2025-12-11 12:53'
 labels:
   - '6502'
   - assembler
@@ -79,3 +79,17 @@ Modify DIR_DB in asm.asm to:
 This is the primary blocker for self-hosting. asm.asm uses ~20 string literals in .DB directives for error messages and prompts.
 <!-- SECTION:DESCRIPTION:END -->
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Completed: String literals now supported in .DB directive
+
+Self-hosting verified: asm.asm successfully assembles itself (1594 bytes)
+
+Fixed 24 label collision groups (8-char truncation) by renaming labels to unique prefixes
+
+Fixed ADD_SYMBOL to return carry set when existing symbol found (prevents value overwrite)
+
+All 281 tests pass
+<!-- SECTION:NOTES:END -->

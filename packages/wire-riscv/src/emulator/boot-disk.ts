@@ -293,6 +293,174 @@ done:   ; Exit
       .build();
     this.fs.createFile('LS', 'BIN');
     this.fs.writeFile('LS', 'BIN', lsExe);
+
+    // ASM command - assembles source files
+    // Hardcoded to assemble HELLO.ASM to HELLO.BIN
+    // Code is 89 instructions (356 bytes = 0x164), so data at 0x1000 + 0x164 = 0x1164
+    const asmCode = asm.assemble(`
+; ASM - native assembler command
+; Assembles HELLO.ASM to HELLO.BIN
+
+        ; Open source file (HELLO.ASM)
+        LUI a0, 0x1
+        ADDI a0, a0, 0x164  ; filename in data
+        ADDI a1, zero, 0    ; mode = read
+        ADDI a7, zero, 7    ; FOPEN
+        ECALL
+        ADDI s0, a0, 0      ; s0 = source file handle
+
+        ; Check if open failed
+        ADDI t0, zero, -1
+        BEQ s0, t0, error_open
+
+        ; Read entire source file into buffer at 0x3000
+        ADDI a0, s0, 0      ; file handle
+        LUI a1, 0x3         ; buffer at 0x3000
+        LUI a2, 0x1         ; read up to 4KB
+        ADDI a7, zero, 8    ; FREAD
+        ECALL
+        ADDI s1, a0, 0      ; s1 = bytes read
+
+        ; Null-terminate the source buffer
+        LUI t0, 0x3
+        ADD t0, t0, s1
+        ADDI t1, zero, 0
+        SB t1, 0(t0)
+
+        ; Close source file
+        ADDI a0, s0, 0
+        ADDI a7, zero, 10   ; FCLOSE
+        ECALL
+
+        ; Call ASSEMBLE syscall
+        ; a0 = source buffer, a1 = output buffer, a2 = max size
+        LUI a0, 0x3         ; source at 0x3000
+        LUI a1, 0x4         ; output at 0x4000
+        LUI a2, 0x1         ; max 4KB output
+        ADDI a7, zero, 13   ; ASSEMBLE syscall
+        ECALL
+        ADDI s2, a0, 0      ; s2 = code size (or -1 if error)
+
+        ; Check for assembly error
+        ADDI t0, zero, -1
+        BEQ s2, t0, error_asm
+
+        ; Open output file (HELLO.BIN)
+        LUI a0, 0x1
+        ADDI a0, a0, 0x16F  ; output filename in data
+        ADDI a1, zero, 1    ; mode = write
+        ADDI a7, zero, 7    ; FOPEN
+        ECALL
+        ADDI s3, a0, 0      ; s3 = output file handle
+
+        ; Check if open failed
+        ADDI t0, zero, -1
+        BEQ s3, t0, error_write
+
+        ; Wrap assembled code in RISV executable format
+        ; Write 24-byte header + assembled code
+
+        ; Write RISV magic (0x56524952)
+        LUI a1, 0x5        ; temp buffer at 0x5000
+        LUI t0, 0x56524
+        ADDI t0, t0, 0x952  ; 0x56524952
+        SW t0, 0(a1)
+
+        ; Write entry point (0x1000)
+        LUI t0, 0x1
+        SW t0, 4(a1)
+
+        ; Write code size
+        SW s2, 8(a1)
+
+        ; Write data size (0)
+        SW zero, 12(a1)
+
+        ; Write BSS size (0)
+        SW zero, 16(a1)
+
+        ; Write stack size (512)
+        ADDI t0, zero, 512
+        SW t0, 20(a1)
+
+        ; Write header to file
+        ADDI a0, s3, 0      ; file handle
+        LUI a1, 0x5         ; header buffer
+        ADDI a2, zero, 24   ; header size
+        ADDI a7, zero, 9    ; FWRITE
+        ECALL
+
+        ; Write assembled code to file
+        ADDI a0, s3, 0      ; file handle
+        LUI a1, 0x4         ; code buffer
+        ADDI a2, s2, 0      ; code size
+        ADDI a7, zero, 9    ; FWRITE
+        ECALL
+
+        ; Close output file
+        ADDI a0, s3, 0
+        ADDI a7, zero, 10   ; FCLOSE
+        ECALL
+
+        ; Print success message
+        LUI a0, 0x1
+        ADDI a0, a0, 0x17A  ; success msg
+        ADDI a7, zero, 3    ; PUTS
+        ECALL
+
+        ; Print code size
+        ADDI a0, s2, 0
+        ADDI a7, zero, 12   ; PUTD
+        ECALL
+
+        LUI a0, 0x1
+        ADDI a0, a0, 0x185  ; bytes suffix
+        ADDI a7, zero, 3
+        ECALL
+
+        JAL zero, done
+
+error_open:
+        LUI a0, 0x1
+        ADDI a0, a0, 0x18D  ; File not found message
+        ADDI a7, zero, 3
+        ECALL
+        JAL zero, done
+
+error_asm:
+        LUI a0, 0x1
+        ADDI a0, a0, 0x19D  ; Assembly error message
+        ADDI a7, zero, 3
+        ECALL
+        JAL zero, done
+
+error_write:
+        LUI a0, 0x1
+        ADDI a0, a0, 0x1AD  ; Write error message
+        ADDI a7, zero, 3
+        ECALL
+
+done:   ADDI a7, zero, 0    ; EXIT
+        ECALL
+`);
+
+    const asmData = new TextEncoder().encode(
+      'HELLO.ASM\0' +           // offset 0x164 (11 bytes)
+      'HELLO.BIN\0' +           // offset 0x16F (11 bytes)
+      'Assembled \0' +          // offset 0x17A (11 bytes)
+      ' bytes\n\0' +            // offset 0x185 (8 bytes)
+      'File not found\n\0' +    // offset 0x18D (16 bytes)
+      'Assembly error\n\0' +    // offset 0x19D (16 bytes)
+      'Write error\n\0'         // offset 0x1AD (13 bytes)
+    );
+
+    const asmExe = new ExecutableBuilder()
+      .setCode(asmCode)
+      .setData(asmData)
+      .setStackSize(1024)
+      .build();
+    this.fs.createFile('ASM', 'BIN');
+    this.fs.writeFile('ASM', 'BIN', asmExe);
   }
 
   /**

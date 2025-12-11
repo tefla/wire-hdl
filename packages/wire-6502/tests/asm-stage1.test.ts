@@ -41,7 +41,7 @@ const ASM_ZP = {
   TMPPTR: 0x56,
   CURPC: 0x5e,
   SRCPTR: 0x60,
-  SYM_TAB: 0x6000,  // Symbol table starts here
+  SYM_TAB: 0x2400,  // Symbol table starts here (after streaming buffer)
 };
 
 /**
@@ -252,7 +252,7 @@ describe('ASM.COM Stage 1 Assembler', () => {
    * Fix: Rewrite GET_SYM_PTR to calculate X*16 correctly:
    *   - Low byte: (X << 4) & $FF via ASL x4
    *   - High byte: X >> 4 via LSR x4
-   *   - Add both to base TMPPTR=$6000
+   *   - Add both to base TMPPTR=SYM_TAB ($2400)
    */
   it('should correctly add symbols to different slots (GET_SYM_PTR regression)', () => {
     const computer = new TestComputer();
@@ -305,16 +305,16 @@ describe('ASM.COM Stage 1 Assembler', () => {
     expect(symbols.length).toBeGreaterThan(1);
 
     // Verify symbols are at correct addresses (each slot is 16 bytes apart)
-    // Slot 0 should be at $6000, slot 1 at $6010, slot 2 at $6020, etc.
+    // Slot 0 should be at $2400, slot 1 at $2410, slot 2 at $2420, etc.
     for (let i = 0; i < symbols.length; i++) {
       const expectedAddress = ASM_ZP.SYM_TAB + symbols[i].slot * 16;
       expect(symbols[i].address).toBe(expectedAddress);
     }
 
-    // Specifically verify slot 1 is at $6010 (this was the bug)
+    // Specifically verify slot 1 is at $2410 (this was the bug)
     if (symbols.length >= 2) {
       const slot1 = computer.getSymbolSlot(1);
-      expect(slot1.address).toBe(0x6010);  // This would have been $0010 with the bug
+      expect(slot1.address).toBe(0x2410);  // This would have been $0010 with the bug
     }
 
     // Log the symbols for debugging
@@ -327,15 +327,15 @@ describe('ASM.COM Stage 1 Assembler', () => {
   it('should verify symbol slot address calculation', () => {
     // This is a pure unit test for the slot address formula
     // Slot N should be at SYM_TAB + N * 16
-    const SYM_TAB = 0x6000;
+    const SYM_TAB = 0x2400;  // Updated for new symbol table location
 
     const testCases = [
-      { slot: 0, expected: 0x6000 },
-      { slot: 1, expected: 0x6010 },
-      { slot: 2, expected: 0x6020 },
-      { slot: 15, expected: 0x60F0 },
-      { slot: 16, expected: 0x6100 },
-      { slot: 255, expected: 0x6FF0 },
+      { slot: 0, expected: 0x2400 },
+      { slot: 1, expected: 0x2410 },
+      { slot: 2, expected: 0x2420 },
+      { slot: 15, expected: 0x24F0 },
+      { slot: 16, expected: 0x2500 },
+      { slot: 255, expected: 0x33F0 },
     ];
 
     for (const { slot, expected } of testCases) {

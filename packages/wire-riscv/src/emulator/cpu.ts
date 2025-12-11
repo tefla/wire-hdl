@@ -13,6 +13,7 @@ import { CDROMDrive } from './cdrom.js';
 import { USBDrive } from './usb.js';
 import { KeyboardController, KEYBOARD_BASE } from './keyboard.js';
 import { WireFS } from './filesystem.js';
+import { NativeAssembler } from './native-assembler.js';
 
 /** File handle for syscall file operations */
 interface FileHandle {
@@ -134,6 +135,7 @@ export const SYSCALL = {
   FCLOSE: 10,
   READDIR: 11,
   PUTD: 12,
+  ASSEMBLE: 13,
 } as const;
 
 export class RiscVCpu {
@@ -829,6 +831,12 @@ export class RiscVCpu {
         this.syscallPutd(a0);
         return true;
 
+      case SYSCALL.ASSEMBLE:
+        // Assemble source: a0=source buffer, a1=output buffer, a2=max output size
+        // Returns: number of bytes written (or -1 on error)
+        this.setReg(10, this.syscallAssemble(a0, a1, this.getReg(12)));
+        return true;
+
       default:
         // Unknown syscall - return -1
         this.setReg(10, 0xFFFFFFFF);
@@ -1202,6 +1210,42 @@ export class RiscVCpu {
     // Print each digit
     for (let i = 0; i < str.length; i++) {
       this.syscallPutchar(str.charCodeAt(i));
+    }
+  }
+
+  /**
+   * Syscall: assemble - assemble source code
+   */
+  private syscallAssemble(sourceBuffer: number, outputBuffer: number, maxOutputSize: number): number {
+    try {
+      // Read null-terminated source string from memory
+      let source = '';
+      let addr = sourceBuffer;
+      while (true) {
+        const byte = this.readByte(addr++);
+        if (byte === 0) break;
+        source += String.fromCharCode(byte);
+      }
+
+      // Assemble using NativeAssembler
+      const asm = new NativeAssembler();
+      const code = asm.assemble(source);
+
+      // Check if output fits
+      if (code.length > maxOutputSize) {
+        return 0xFFFFFFFF; // Error: output too large
+      }
+
+      // Write assembled code to output buffer
+      for (let i = 0; i < code.length; i++) {
+        this.writeByte(outputBuffer + i, code[i]);
+      }
+
+      return code.length;
+    } catch (err) {
+      // Assembly error - could log the error for debugging
+      // console.error('Assembly error:', err);
+      return 0xFFFFFFFF;
     }
   }
 }

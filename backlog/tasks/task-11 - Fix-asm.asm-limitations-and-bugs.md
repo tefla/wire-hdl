@@ -1,10 +1,10 @@
 ---
 id: task-11
 title: Fix asm.asm limitations and bugs
-status: In Progress
+status: Done
 assignee: []
 created_date: '2025-12-11 10:20'
-updated_date: '2025-12-11 10:41'
+updated_date: '2025-12-11 12:53'
 labels:
   - '6502'
   - assembler
@@ -47,7 +47,7 @@ These bugs prevent:
 - [x] #1 All bugs have regression tests written BEFORE fixes
 - [x] #2 asm.asm can assemble files using .DB directive
 - [x] #3 asm.asm can handle forward JMP references
-- [ ] #4 asm.asm can assemble larger source files (at least 16KB)
+- [x] #4 asm.asm can assemble larger source files (at least 16KB)
 - [x] #5 All existing tests continue to pass
 <!-- AC:END -->
 
@@ -63,4 +63,8 @@ Investigation revealed .DB actually works correctly. The original error was caus
 ### task-11.2: Forward JMP References - FIXED
 
 Added LABELREF flag to track label references and force absolute addressing mode. All tests pass.
+
+All criteria met: asm.asm (75KB) successfully assembles itself using streaming I/O
+
+Self-hosting verified with 281 tests passing
 <!-- SECTION:NOTES:END -->

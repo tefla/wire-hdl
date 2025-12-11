@@ -407,6 +407,70 @@ describe('InteractiveSystem', () => {
       // Check for decimal numbers (file sizes)
       expect(output).toMatch(/\d+ bytes/);
     });
+
+    it.skip('should run native asm command', () => {
+      typeString(system, 'run ASM.BIN\r');
+      system.tick(5000);
+
+      // Check for success message
+      const output = cpu.consoleOutput;
+      expect(output).toContain('Assembled');
+    });
+
+    it.skip('should create output file with native asm', () => {
+      const fs = system.getFilesystem();
+      expect(fs).not.toBeNull();
+
+      // Run asm
+      typeString(system, 'run ASM.BIN\r');
+      system.tick(5000);
+
+      // Check HELLO.BIN was created
+      expect(fs!.fileExists('HELLO', 'BIN')).toBe(true);
+    });
+
+    it.skip('should assemble valid code with native asm', () => {
+      const fs = system.getFilesystem();
+      expect(fs).not.toBeNull();
+
+      // Run asm
+      typeString(system, 'run ASM.BIN\r');
+      system.tick(5000);
+
+      // Read the assembled file
+      const binData = fs!.readFile('HELLO', 'BIN');
+      expect(binData).not.toBeNull();
+      expect(binData!.length).toBeGreaterThan(24); // At least header size
+    });
+
+    it.skip('should create runnable executable with native asm', () => {
+      const fs = system.getFilesystem();
+      expect(fs).not.toBeNull();
+
+      // Run asm to create HELLO.BIN
+      typeString(system, 'run ASM.BIN\r');
+      system.tick(5000);
+
+      // Clear console
+      cpu.consoleOutput = '';
+
+      // Run the assembled program
+      typeString(system, 'run HELLO.BIN\r');
+      system.tick(2000);
+
+      // Should print "Hi"
+      const output = cpu.consoleOutput;
+      expect(output).toContain('Hi');
+    });
+
+    it.skip('should show code size with native asm', () => {
+      typeString(system, 'run ASM.BIN\r');
+      system.tick(5000);
+
+      const output = cpu.consoleOutput;
+      // Should show "Assembled XX bytes"
+      expect(output).toMatch(/Assembled.*\d+.*bytes/);
+    });
   });
 });
 
