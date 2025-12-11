@@ -1140,7 +1140,99 @@ describe('AS.COM Bootstrap Chain (task-8.1)', () => {
       }
     }
 
-    console.log('AS ASM2.ASM output (last 500 chars):', computer.output.slice(-500));
+    console.log('AS ASM2.ASM output:', computer.output);
+
+    // Always dump some debug info
+    // FILESIZE = $5E (16-bit), FILESIZE_HI = $72 (16-bit), FILE_START = $68 (16-bit)
+    const filesize_lo = computer.memory[0x5e] | (computer.memory[0x5f] << 8);
+    const filesize_hi = computer.memory[0x72] | (computer.memory[0x73] << 8);
+    const filesize = filesize_lo | (filesize_hi << 16);
+    console.log(`FILESIZE: ${filesize} bytes (expected ~64712)`);
+
+    const FILE_START = computer.memory[0x68] | (computer.memory[0x69] << 8);
+    console.log(`FILE_START sector: ${FILE_START}`);
+
+    // If there's an error, dump debug info
+    if (computer.output.includes('Error')) {
+      console.log('PASS value:', computer.memory[0x38]);  // PASS is at $38
+      console.log('LINENUM:', computer.memory[0x3a] | (computer.memory[0x3b] << 8));
+
+      // Dump symbol table and search for BANNER
+      const SYM_TAB = 0x2400;
+      let bannerFound = false;
+      let symbolCount = 0;
+      console.log('Symbol table search for BANNER:');
+      for (let i = 0; i < 448; i++) {
+        const ptr = SYM_TAB + i * 16;
+        if (computer.memory[ptr] === 0) {
+          console.log(`  Symbol table ends at index ${i} (${symbolCount} symbols)`);
+          break;
+        }
+        symbolCount++;
+        const name = Array.from(computer.memory.slice(ptr, ptr + 8))
+          .map(b => b ? String.fromCharCode(b) : '.')
+          .join('');
+        const value = computer.memory[ptr + 8] | (computer.memory[ptr + 9] << 8);
+        const defined = computer.memory[ptr + 10];
+        if (name.startsWith('BANNER')) {
+          console.log(`  Found BANNER at index ${i}: "${name}" = $${value.toString(16).padStart(4, '0')} (defined=${defined})`);
+          bannerFound = true;
+        }
+      }
+      if (!bannerFound) {
+        console.log('  BANNER not found in symbol table!');
+      }
+      console.log(`Total symbols: ${symbolCount}`);
+
+      // Show last 5 symbols
+      console.log('Last 5 symbols (full 16 bytes):');
+      for (let i = Math.max(0, symbolCount - 5); i < symbolCount; i++) {
+        const ptr = SYM_TAB + i * 16;
+        const rawBytes = Array.from(computer.memory.slice(ptr, ptr + 16))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join(' ');
+        const name = Array.from(computer.memory.slice(ptr, ptr + 8))
+          .map(b => b >= 32 && b < 127 ? String.fromCharCode(b) : '.')
+          .join('');
+        const value = computer.memory[ptr + 8] | (computer.memory[ptr + 9] << 8);
+        const defined = computer.memory[ptr + 10];
+        console.log(`  ${i}: [${rawBytes}] "${name}" = $${value.toString(16).padStart(4, '0')} (defined=${defined})`);
+      }
+
+      // Also show entry 78 (the first empty slot after the last symbol)
+      const nextPtr = SYM_TAB + symbolCount * 16;
+      const nextRawBytes = Array.from(computer.memory.slice(nextPtr, nextPtr + 16))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join(' ');
+      console.log(`  ${symbolCount}: [${nextRawBytes}] (first empty slot)`);
+
+      // Check SRCPTR and streaming state
+      const srcPtr = computer.memory[0x60] | (computer.memory[0x61] << 8);
+      console.log(`SRCPTR: $${srcPtr.toString(16)}`);
+      console.log(`Content at SRCPTR: "${Array.from(computer.memory.slice(srcPtr, srcPtr + 40)).map(b => b >= 32 && b < 127 ? String.fromCharCode(b) : '.').join('')}"`);
+
+      // Check STREAM variables
+      const streamSec = computer.memory[0x6a] | (computer.memory[0x6b] << 8);
+      const streamLeft = computer.memory[0x6c] | (computer.memory[0x6d] << 8) |
+                         (computer.memory[0x6e] << 16) | (computer.memory[0x6f] << 24);
+      const streamEnd = computer.memory[0x70] | (computer.memory[0x71] << 8);
+      console.log(`STREAM_SEC: ${streamSec}, STREAM_LEFT: ${streamLeft}, STREAM_END: $${streamEnd.toString(16)}`);
+
+      // Check for null bytes in SRC_BUF area
+      const SRC_BUF = 0x2000;
+      console.log('Null bytes in SRC_BUF area:');
+      for (let i = 0; i < 0x400; i++) {
+        if (computer.memory[SRC_BUF + i] === 0) {
+          const context = Array.from(computer.memory.slice(SRC_BUF + i - 10, SRC_BUF + i + 10))
+            .map(b => b >= 32 && b < 127 ? String.fromCharCode(b) : '.')
+            .join('');
+          console.log(`  Null at $${(SRC_BUF + i).toString(16)}: "${context}"`);
+          if (i < 0x200) {
+            console.log(`  ^ This is BEFORE midpoint, might be premature EOF!`);
+          }
+        }
+      }
+    }
 
     expect(computer.output).not.toContain('not found');
     expect(computer.output).not.toContain('Error');
