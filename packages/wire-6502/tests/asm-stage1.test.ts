@@ -159,6 +159,7 @@ class TestComputer {
           const sectorData = this.hdd.get(sector + i) || new Uint8Array(512);
           // Debug high sector reads
           if (sector >= 300 && this.debugReads) {
+            this.sectorReadCount++;
             console.log(`HDD READ: sector=${sector + i} -> buf=$${bufAddr.toString(16)}, first bytes: ${Array.from(sectorData.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
           }
           for (let j = 0; j < 512; j++) {
@@ -180,8 +181,10 @@ class TestComputer {
   }
 
   debugReads = false;
+  sectorReadCount = 0;
   enableDebugReads(): void {
     this.debugReads = true;
+    this.sectorReadCount = 0;
   }
 
   run(instructions: number): void {
@@ -1003,6 +1006,7 @@ describe('ASM.COM Self-Hosting (task-11.5)', () => {
         console.log(`STREAM_SEC: ${computer.memory[0x6a] | (computer.memory[0x6b] << 8)}`);
         console.log(`MNEMBUF: "${Array.from(computer.memory.slice(0x40, 0x48)).map(b => b ? String.fromCharCode(b) : '.').join('')}"`);
         console.log(`LINENUM: ${computer.memory[0x3a] | (computer.memory[0x3b] << 8)}`);
+        console.log(`Total sector reads: ${computer.sectorReadCount} (${computer.sectorReadCount * 512} bytes)`);
       }
     }
 

@@ -1,7 +1,7 @@
 ---
 id: task-29
 title: Native RISC-V shell commands
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 18:00'
 labels:
@@ -46,19 +46,19 @@ Currently, commands like `cat`, `ls`, `asm` are implemented in TypeScript in `In
 
 ## Subtasks
 
-- [ ] task-29.1: Define file operation syscalls
-- [ ] task-29.2: Implement native `cat` command
-- [ ] task-29.3: Implement native `ls` command
-- [ ] task-29.4: Implement native `echo` command
-- [ ] task-29.5: Implement native `asm` command (blocked by task-27.4: self-hosting assembler)
+- [x] task-29.1: Define file operation syscalls
+- [x] task-29.2: Implement native `cat` command
+- [x] task-29.3: Implement native `ls` command
+- [x] task-29.4: Implement native `echo` command
+- [ ] task-29.5: Implement native `asm` command (blocked by task-27.4: self-hosting assembler - deferred)
 
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE_CRITERIA:BEGIN -->
-- [ ] File syscalls implemented (open, read, write, close, readdir)
-- [ ] `cat` runs as native RISC-V code
-- [ ] `ls` runs as native RISC-V code
-- [ ] `echo` runs as native RISC-V code
-- [ ] Commands produce same output as TypeScript versions
-- [ ] 10+ tests for native commands
+- [x] File syscalls implemented (open, read, write, close, readdir)
+- [x] `cat` runs as native RISC-V code
+- [x] `ls` runs as native RISC-V code
+- [x] `echo` runs as native RISC-V code
+- [x] Commands produce same output as TypeScript versions
+- [x] 10+ tests for native commands (11 tests implemented)
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->
