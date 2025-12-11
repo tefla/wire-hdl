@@ -1,7 +1,7 @@
 ---
 id: task-10
 title: 'Hello World program for RISC-V emulator'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 14:00'
 labels:
