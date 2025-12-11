@@ -1,7 +1,7 @@
 ---
 id: task-31.2
 title: Text buffer data structure
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 15:00'
 labels:
@@ -57,10 +57,10 @@ struct TextBuffer {
 
 ## Acceptance Criteria
 
-- [ ] Can initialize empty text buffer
-- [ ] Can insert lines at any position
-- [ ] Can delete lines
-- [ ] Can get/set line content
-- [ ] Modified flag tracks changes
-- [ ] Buffer handles growing beyond initial capacity
-- [ ] 8+ tests for buffer operations
+- [x] Can initialize empty text buffer
+- [x] Can insert lines at any position
+- [x] Can delete lines
+- [x] Can get/set line content
+- [x] Modified flag tracks changes
+- [x] Buffer handles growing beyond initial capacity
+- [x] 8+ tests for buffer operations (10 tests implemented)
