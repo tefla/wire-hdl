@@ -1,7 +1,7 @@
 ---
 id: task-9
 title: Hardware integration with CPU memory bus
-status: In Progress
+status: Done
 assignee: []
 created_date: '2025-12-11 14:00'
 labels:

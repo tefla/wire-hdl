@@ -7,6 +7,10 @@
  */
 
 import { GraphicsCard, GRAPHICS_BASE } from './graphics.js';
+import { StorageController, STORAGE_BASE } from './storage-controller.js';
+import { HardDiskDrive } from './hdd.js';
+import { CDROMDrive } from './cdrom.js';
+import { USBDrive } from './usb.js';
 
 // Instruction format opcodes
 export const OPCODE = {
@@ -111,6 +115,7 @@ export class RiscVCpu {
   public halted: boolean = false;
   public cycles: number = 0;
   public gpu: GraphicsCard;
+  public storage: StorageController;
 
   constructor(config: RiscVConfig = {}) {
     const memorySize = config.memorySize ?? 64 * 1024; // 64KB default
@@ -118,6 +123,12 @@ export class RiscVCpu {
     this.x = new Uint32Array(32);
     this.pc = config.initialPc ?? 0;
     this.gpu = new GraphicsCard();
+
+    // Initialize storage with default devices
+    const hdd = new HardDiskDrive(1024 * 1024); // 1MB HDD
+    const cdrom = new CDROMDrive();
+    const usb = new USBDrive();
+    this.storage = new StorageController(hdd, cdrom, usb);
   }
 
   /**
@@ -125,6 +136,13 @@ export class RiscVCpu {
    */
   getGraphicsCard(): GraphicsCard {
     return this.gpu;
+  }
+
+  /**
+   * Get the storage controller
+   */
+  getStorageController(): StorageController {
+    return this.storage;
   }
 
   /**
@@ -154,6 +172,10 @@ export class RiscVCpu {
     if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
       return this.gpu.mmioRead(address);
     }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      return this.storage.mmioRead(address);
+    }
     return (
       (this.memory[address] |
         (this.memory[address + 1] << 8) |
@@ -171,6 +193,10 @@ export class RiscVCpu {
     if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
       return this.gpu.mmioReadHalfword(address);
     }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      return this.storage.mmioReadHalfword(address);
+    }
     return this.memory[address] | (this.memory[address + 1] << 8);
   }
 
@@ -182,6 +208,10 @@ export class RiscVCpu {
     if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
       return this.gpu.mmioReadByte(address);
     }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      return this.storage.mmioReadByte(address);
+    }
     return this.memory[address];
   }
 
@@ -192,6 +222,11 @@ export class RiscVCpu {
     // Route to GPU if address is in graphics range
     if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
       this.gpu.mmioWrite(address, value);
+      return;
+    }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      this.storage.mmioWrite(address, value);
       return;
     }
     this.memory[address] = value & 0xff;
@@ -209,6 +244,11 @@ export class RiscVCpu {
       this.gpu.mmioWriteHalfword(address, value);
       return;
     }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      this.storage.mmioWriteHalfword(address, value);
+      return;
+    }
     this.memory[address] = value & 0xff;
     this.memory[address + 1] = (value >> 8) & 0xff;
   }
@@ -220,6 +260,11 @@ export class RiscVCpu {
     // Route to GPU if address is in graphics range
     if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
       this.gpu.mmioWriteByte(address, value);
+      return;
+    }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      this.storage.mmioWriteByte(address, value);
       return;
     }
     this.memory[address] = value & 0xff;

@@ -317,4 +317,62 @@ export class StorageController {
     if (offset >= DMA_BUFFER_OFFSET && offset < DMA_BUFFER_OFFSET + DMA_BUFFER_SIZE) return true;
     return false;
   }
+
+  /**
+   * Memory-mapped I/O read byte
+   */
+  mmioReadByte(address: number): number {
+    const offset = address - STORAGE_BASE;
+
+    // Registers
+    if (offset >= 0 && offset < STORAGE_REGS_SIZE) {
+      const regOffset = offset & ~0x3;
+      const byteOffset = offset & 0x3;
+      const value = this.readRegister(regOffset);
+      return (value >> (byteOffset * 8)) & 0xff;
+    }
+
+    // DMA buffer
+    if (offset >= DMA_BUFFER_OFFSET && offset < DMA_BUFFER_OFFSET + DMA_BUFFER_SIZE) {
+      return this.dmaBuffer[offset - DMA_BUFFER_OFFSET];
+    }
+
+    return 0;
+  }
+
+  /**
+   * Memory-mapped I/O write byte
+   */
+  mmioWriteByte(address: number, value: number): void {
+    const offset = address - STORAGE_BASE;
+
+    // Registers - write affects full register for simplicity
+    if (offset >= 0 && offset < STORAGE_REGS_SIZE) {
+      const regOffset = offset & ~0x3;
+      this.writeRegister(regOffset, value & 0xff);
+      return;
+    }
+
+    // DMA buffer
+    if (offset >= DMA_BUFFER_OFFSET && offset < DMA_BUFFER_OFFSET + DMA_BUFFER_SIZE) {
+      this.dmaBuffer[offset - DMA_BUFFER_OFFSET] = value & 0xff;
+    }
+  }
+
+  /**
+   * Memory-mapped I/O read halfword
+   */
+  mmioReadHalfword(address: number): number {
+    const lo = this.mmioReadByte(address);
+    const hi = this.mmioReadByte(address + 1);
+    return lo | (hi << 8);
+  }
+
+  /**
+   * Memory-mapped I/O write halfword
+   */
+  mmioWriteHalfword(address: number, value: number): void {
+    this.mmioWriteByte(address, value & 0xff);
+    this.mmioWriteByte(address + 1, (value >> 8) & 0xff);
+  }
 }

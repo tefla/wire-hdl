@@ -1,7 +1,7 @@
 ---
 id: task-9.3
 title: 'Integration: Connect storage controller to CPU memory bus'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 14:00'
 labels:
