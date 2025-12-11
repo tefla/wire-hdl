@@ -395,6 +395,8 @@ describe('INSTALL and DIR integration', () => {
 
     // Wait for assembly to complete and file to be saved
     const gotSaved = computer.runUntilOutput('Saved', 2000000);
+    console.log('Output before Saved check:', computer.output);
+    console.log('PC:', computer.cpu.pc.toString(16));
     expect(gotSaved).toBe(true);
     console.log('After ASM (with save):', computer.output);
 

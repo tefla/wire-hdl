@@ -6,6 +6,24 @@
  * 32-bit program counter
  */
 
+import { GraphicsCard, GRAPHICS_BASE } from './graphics.js';
+import { StorageController, STORAGE_BASE } from './storage-controller.js';
+import { HardDiskDrive } from './hdd.js';
+import { CDROMDrive } from './cdrom.js';
+import { USBDrive } from './usb.js';
+import { KeyboardController, KEYBOARD_BASE } from './keyboard.js';
+import { WireFS } from './filesystem.js';
+import { NativeAssembler } from './native-assembler.js';
+
+/** File handle for syscall file operations */
+interface FileHandle {
+  name: string;
+  extension: string;
+  data: Uint8Array;
+  cursor: number;
+  mode: 'r' | 'w';
+}
+
 // Instruction format opcodes
 export const OPCODE = {
   LUI: 0b0110111, // Load Upper Immediate
@@ -102,18 +120,72 @@ function signExtend(value: number, bits: number): number {
 /**
  * RISC-V RV32I CPU Emulator
  */
+// Syscall numbers
+export const SYSCALL = {
+  EXIT: 0,
+  PUTCHAR: 1,
+  GETCHAR: 2,
+  PUTS: 3,
+  READ_SECTOR: 4,
+  WRITE_SECTOR: 5,
+  GETLINE: 6,
+  FOPEN: 7,
+  FREAD: 8,
+  FWRITE: 9,
+  FCLOSE: 10,
+  READDIR: 11,
+  PUTD: 12,
+  ASSEMBLE: 13,
+} as const;
+
 export class RiscVCpu {
   public x: Uint32Array; // Registers
   public pc: number;
   public memory: Uint8Array;
   public halted: boolean = false;
   public cycles: number = 0;
+  public gpu: GraphicsCard;
+  public storage: StorageController;
+  public keyboard: KeyboardController;
+  public filesystem: WireFS | null = null;
+
+  // Syscall-related state
+  public exitCode: number = 0;
+  public consoleOutput: string = '';
+  private fileHandles: Map<number, FileHandle> = new Map();
+  private nextFileHandle: number = 1;
+  private dirIterator: number = 0;
+  private dirFileList: Array<{name: string, extension: string, size: number}> | null = null;
 
   constructor(config: RiscVConfig = {}) {
     const memorySize = config.memorySize ?? 64 * 1024; // 64KB default
     this.memory = new Uint8Array(memorySize);
     this.x = new Uint32Array(32);
     this.pc = config.initialPc ?? 0;
+    this.gpu = new GraphicsCard();
+
+    // Initialize storage with default devices
+    const hdd = new HardDiskDrive(1024 * 1024); // 1MB HDD
+    const cdrom = new CDROMDrive();
+    const usb = new USBDrive();
+    this.storage = new StorageController(hdd, cdrom, usb);
+
+    // Initialize keyboard controller
+    this.keyboard = new KeyboardController();
+  }
+
+  /**
+   * Get the attached graphics card
+   */
+  getGraphicsCard(): GraphicsCard {
+    return this.gpu;
+  }
+
+  /**
+   * Get the storage controller
+   */
+  getStorageController(): StorageController {
+    return this.storage;
   }
 
   /**
@@ -139,6 +211,18 @@ export class RiscVCpu {
    * Read a 32-bit word from memory (little-endian)
    */
   readWord(address: number): number {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      return this.gpu.mmioRead(address);
+    }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      return this.storage.mmioRead(address);
+    }
+    // Route to keyboard if address is in keyboard range
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      return this.keyboard.mmioRead(address);
+    }
     return (
       (this.memory[address] |
         (this.memory[address + 1] << 8) |
@@ -152,6 +236,18 @@ export class RiscVCpu {
    * Read a 16-bit halfword from memory (little-endian)
    */
   readHalfword(address: number): number {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      return this.gpu.mmioReadHalfword(address);
+    }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      return this.storage.mmioReadHalfword(address);
+    }
+    // Route to keyboard if address is in keyboard range
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      return this.keyboard.mmioReadHalfword(address);
+    }
     return this.memory[address] | (this.memory[address + 1] << 8);
   }
 
@@ -159,6 +255,18 @@ export class RiscVCpu {
    * Read a byte from memory
    */
   readByte(address: number): number {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      return this.gpu.mmioReadByte(address);
+    }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      return this.storage.mmioReadByte(address);
+    }
+    // Route to keyboard if address is in keyboard range
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      return this.keyboard.mmioReadByte(address);
+    }
     return this.memory[address];
   }
 
@@ -166,6 +274,21 @@ export class RiscVCpu {
    * Write a 32-bit word to memory (little-endian)
    */
   writeWord(address: number, value: number): void {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      this.gpu.mmioWrite(address, value);
+      return;
+    }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      this.storage.mmioWrite(address, value);
+      return;
+    }
+    // Route to keyboard if address is in keyboard range (read-only, but route anyway)
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      this.keyboard.mmioWrite(address, value);
+      return;
+    }
     this.memory[address] = value & 0xff;
     this.memory[address + 1] = (value >> 8) & 0xff;
     this.memory[address + 2] = (value >> 16) & 0xff;
@@ -176,6 +299,21 @@ export class RiscVCpu {
    * Write a 16-bit halfword to memory (little-endian)
    */
   writeHalfword(address: number, value: number): void {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      this.gpu.mmioWriteHalfword(address, value);
+      return;
+    }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      this.storage.mmioWriteHalfword(address, value);
+      return;
+    }
+    // Route to keyboard if address is in keyboard range (read-only, but route anyway)
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      this.keyboard.mmioWriteHalfword(address, value);
+      return;
+    }
     this.memory[address] = value & 0xff;
     this.memory[address + 1] = (value >> 8) & 0xff;
   }
@@ -184,6 +322,21 @@ export class RiscVCpu {
    * Write a byte to memory
    */
   writeByte(address: number, value: number): void {
+    // Route to GPU if address is in graphics range
+    if (address >= GRAPHICS_BASE && this.gpu.isInRange(address)) {
+      this.gpu.mmioWriteByte(address, value);
+      return;
+    }
+    // Route to storage if address is in storage range
+    if (address >= STORAGE_BASE && this.storage.isInRange(address)) {
+      this.storage.mmioWriteByte(address, value);
+      return;
+    }
+    // Route to keyboard if address is in keyboard range (read-only, but route anyway)
+    if (address >= KEYBOARD_BASE && this.keyboard.isInRange(address)) {
+      this.keyboard.mmioWriteByte(address, value);
+      return;
+    }
     this.memory[address] = value & 0xff;
   }
 
@@ -195,12 +348,26 @@ export class RiscVCpu {
   }
 
   /**
+   * Get register value (alias for getReg)
+   */
+  getRegister(index: number): number {
+    return this.getReg(index);
+  }
+
+  /**
    * Set register value (writes to x0 are ignored)
    */
   setReg(index: number, value: number): void {
     if (index !== 0) {
       this.x[index] = value >>> 0; // Ensure unsigned 32-bit
     }
+  }
+
+  /**
+   * Get total memory size
+   */
+  getMemorySize(): number {
+    return this.memory.length;
   }
 
   /**
@@ -538,9 +705,11 @@ export class RiscVCpu {
         const { imm } = this.decodeI(instruction);
 
         if (imm === 0) {
-          // ECALL - environment call
-          this.halted = true;
-          return false;
+          // ECALL - environment call (dispatch to syscall handler)
+          const result = this.handleSyscall();
+          if (result === false) {
+            return false; // CPU halted
+          }
         } else if (imm === 1) {
           // EBREAK - breakpoint
           this.halted = true;
@@ -583,5 +752,500 @@ export class RiscVCpu {
       halted: this.halted,
       cycles: this.cycles,
     };
+  }
+
+  /**
+   * Handle ECALL syscall
+   * Returns false if CPU should halt, true to continue
+   */
+  private handleSyscall(): boolean {
+    const syscallNum = this.getReg(17); // a7
+    const a0 = this.getReg(10);
+    const a1 = this.getReg(11);
+
+    switch (syscallNum) {
+      case SYSCALL.EXIT:
+        // Exit with code in a0
+        this.exitCode = a0;
+        this.halted = true;
+        return false;
+
+      case SYSCALL.PUTCHAR:
+        // Write character in a0 to console
+        this.syscallPutchar(a0);
+        this.setReg(10, 0); // Return 0 (success)
+        return true;
+
+      case SYSCALL.GETCHAR:
+        // Read character from keyboard
+        this.setReg(10, this.syscallGetchar());
+        return true;
+
+      case SYSCALL.PUTS:
+        // Print null-terminated string at address a0
+        this.setReg(10, this.syscallPuts(a0));
+        return true;
+
+      case SYSCALL.READ_SECTOR:
+        // Read sector a0 to buffer at a1
+        this.setReg(10, this.syscallReadSector(a0, a1));
+        return true;
+
+      case SYSCALL.WRITE_SECTOR:
+        // Write buffer at a1 to sector a0
+        this.setReg(10, this.syscallWriteSector(a0, a1));
+        return true;
+
+      case SYSCALL.GETLINE:
+        // Read line into buffer a0 with max length a1
+        this.setReg(10, this.syscallGetline(a0, a1));
+        return true;
+
+      case SYSCALL.FOPEN:
+        // Open file: a0=filename address, a1=mode (0=read, 1=write)
+        this.setReg(10, this.syscallFopen(a0, a1));
+        return true;
+
+      case SYSCALL.FREAD:
+        // Read from file: a0=handle, a1=buffer, a2=count
+        this.setReg(10, this.syscallFread(a0, a1, this.getReg(12)));
+        return true;
+
+      case SYSCALL.FWRITE:
+        // Write to file: a0=handle, a1=buffer, a2=count
+        this.setReg(10, this.syscallFwrite(a0, a1, this.getReg(12)));
+        return true;
+
+      case SYSCALL.FCLOSE:
+        // Close file: a0=handle
+        this.setReg(10, this.syscallFclose(a0));
+        return true;
+
+      case SYSCALL.READDIR:
+        // Read directory: a0=buffer for name, a1=buffer for ext, a2=buffer for size
+        this.setReg(10, this.syscallReaddir(a0, a1, this.getReg(12)));
+        return true;
+
+      case SYSCALL.PUTD:
+        // Print decimal: a0=number to print
+        this.syscallPutd(a0);
+        return true;
+
+      case SYSCALL.ASSEMBLE:
+        // Assemble source: a0=source buffer, a1=output buffer, a2=max output size
+        // Returns: number of bytes written (or -1 on error)
+        this.setReg(10, this.syscallAssemble(a0, a1, this.getReg(12)));
+        return true;
+
+      default:
+        // Unknown syscall - return -1
+        this.setReg(10, 0xFFFFFFFF);
+        return true;
+    }
+  }
+
+  /**
+   * Syscall: putchar - write character to console
+   */
+  private syscallPutchar(char: number): void {
+    const ch = char & 0xFF;
+    this.consoleOutput += String.fromCharCode(ch);
+
+    // Also write to screen VRAM if it's a printable character
+    let cursor = this.gpu.getCursorPosition();
+
+    if (ch === 0x0D || ch === 0x0A) {
+      // Carriage return or newline - move to start of next line
+      this.gpu.writeRegister(0x04, 0); // CURSOR_X = 0
+      const newY = cursor.y + 1;
+      if (newY >= 25) {
+        this.scrollScreen();
+        this.gpu.writeRegister(0x08, 24);
+      } else {
+        this.gpu.writeRegister(0x08, newY);
+      }
+    } else if (ch === 0x08) {
+      // Backspace - move cursor back
+      if (cursor.x > 0) {
+        this.gpu.writeRegister(0x04, cursor.x - 1);
+        this.gpu.writeTextVram(cursor.x - 1, cursor.y, 0x20, 0x07);
+      }
+    } else if (ch === 0x09) {
+      // Tab - advance to next tab stop (every 8 columns)
+      const newX = (Math.floor(cursor.x / 8) + 1) * 8;
+      if (newX >= 80) {
+        // Line wrap on tab
+        this.gpu.writeRegister(0x04, 0);
+        const newY = cursor.y + 1;
+        if (newY >= 25) {
+          this.scrollScreen();
+          this.gpu.writeRegister(0x08, 24);
+        } else {
+          this.gpu.writeRegister(0x08, newY);
+        }
+      } else {
+        this.gpu.writeRegister(0x04, newX);
+      }
+    } else if (ch >= 0x20) {
+      // Printable character - write to VRAM and advance cursor
+      this.gpu.writeTextVram(cursor.x, cursor.y, ch, 0x07);
+      const newX = cursor.x + 1;
+      if (newX >= 80) {
+        // Line wrap
+        this.gpu.writeRegister(0x04, 0);
+        const newY = cursor.y + 1;
+        if (newY >= 25) {
+          this.scrollScreen();
+          this.gpu.writeRegister(0x08, 24);
+        } else {
+          this.gpu.writeRegister(0x08, newY);
+        }
+      } else {
+        this.gpu.writeRegister(0x04, newX);
+      }
+    }
+  }
+
+  /**
+   * Scroll screen up by one line
+   */
+  private scrollScreen(): void {
+    const vram = this.gpu.getTextVram();
+
+    // Copy lines 1-24 to lines 0-23
+    for (let y = 0; y < 24; y++) {
+      for (let x = 0; x < 80; x++) {
+        const srcOffset = ((y + 1) * 80 + x) * 2;
+        const dstOffset = (y * 80 + x) * 2;
+        const char = vram[srcOffset];
+        const attr = vram[srcOffset + 1];
+        this.gpu.writeTextVram(x, y, char, attr);
+      }
+    }
+
+    // Clear last line
+    for (let x = 0; x < 80; x++) {
+      this.gpu.writeTextVram(x, 24, 0x20, 0x07);
+    }
+  }
+
+  /**
+   * Syscall: getchar - read character from keyboard (non-blocking)
+   */
+  private syscallGetchar(): number {
+    if (this.keyboard.hasKey()) {
+      return this.keyboard.readRegister(0x04); // Read DATA register
+    }
+    return 0xFFFFFFFF; // -1 (no key available)
+  }
+
+  /**
+   * Syscall: puts - print null-terminated string
+   */
+  private syscallPuts(address: number): number {
+    let count = 0;
+    let addr = address;
+    while (true) {
+      const ch = this.readByte(addr);
+      if (ch === 0) break;
+      this.syscallPutchar(ch);
+      addr++;
+      count++;
+      // Safety limit
+      if (count > 10000) break;
+    }
+    return count;
+  }
+
+  /**
+   * Syscall: read_sector - read disk sector to memory
+   */
+  private syscallReadSector(sector: number, buffer: number): number {
+    try {
+      const data = this.storage.getHdd().read(sector, 1); // Read 1 sector
+      for (let i = 0; i < data.length; i++) {
+        this.writeByte(buffer + i, data[i]);
+      }
+      return 0; // Success
+    } catch {
+      return 0xFFFFFFFF; // Error
+    }
+  }
+
+  /**
+   * Syscall: write_sector - write memory to disk sector
+   */
+  private syscallWriteSector(sector: number, buffer: number): number {
+    try {
+      const data = new Uint8Array(512);
+      for (let i = 0; i < 512; i++) {
+        data[i] = this.readByte(buffer + i);
+      }
+      this.storage.getHdd().write(sector, data);
+      return 0; // Success
+    } catch {
+      return 0xFFFFFFFF; // Error
+    }
+  }
+
+  /**
+   * Syscall: getline - read a line of input from keyboard
+   * Non-blocking: processes available keys until Enter or returns -1 if no Enter yet
+   */
+  private syscallGetline(buffer: number, maxlen: number): number {
+    // Collect all available keys looking for Enter
+    const chars: number[] = [];
+    let foundEnter = false;
+
+    // Process all available keys
+    while (this.keyboard.hasKey()) {
+      const ch = this.keyboard.readRegister(0x04); // Read and consume key
+
+      if (ch === 0x0D || ch === 0x0A) {
+        // Enter pressed - line is complete
+        foundEnter = true;
+        this.syscallPutchar(ch); // Echo newline
+        break;
+      } else if (ch === 0x08) {
+        // Backspace - remove last character
+        if (chars.length > 0) {
+          chars.pop();
+          this.syscallPutchar(ch); // Echo backspace
+        }
+      } else if (ch >= 0x20 && ch < 0x7F) {
+        // Printable character - only add if under maxlen
+        if (chars.length < maxlen) {
+          chars.push(ch);
+          this.syscallPutchar(ch); // Echo character
+        }
+        // If at maxlen, just consume and ignore the character
+      }
+    }
+
+    if (!foundEnter) {
+      // No Enter yet - return -1 to indicate line not complete
+      // The caller should retry
+      return 0xFFFFFFFF; // -1
+    }
+
+    // Write characters to buffer
+    for (let i = 0; i < chars.length; i++) {
+      this.writeByte(buffer + i, chars[i]);
+    }
+    // Null terminate
+    this.writeByte(buffer + chars.length, 0);
+
+    return chars.length;
+  }
+
+  /**
+   * Syscall: fopen - open file
+   * Returns file handle, or -1 on error
+   */
+  private syscallFopen(filenameAddr: number, mode: number): number {
+    if (!this.filesystem) {
+      return 0xFFFFFFFF; // No filesystem
+    }
+
+    // Read filename from memory (format: "NAME.EXT\0")
+    let filename = '';
+    let addr = filenameAddr;
+    for (let i = 0; i < 100; i++) {
+      const ch = this.readByte(addr++);
+      if (ch === 0) break;
+      filename += String.fromCharCode(ch);
+    }
+
+    // Parse name.ext
+    filename = filename.toUpperCase();
+    const dotIndex = filename.lastIndexOf('.');
+    const name = dotIndex > 0 ? filename.slice(0, dotIndex) : filename;
+    const ext = dotIndex > 0 ? filename.slice(dotIndex + 1) : '';
+
+    // Read file
+    const data = this.filesystem.readFile(name, ext);
+    if (!data && mode === 0) {
+      return 0xFFFFFFFF; // File not found (read mode)
+    }
+
+    // Create handle
+    const handle = this.nextFileHandle++;
+    this.fileHandles.set(handle, {
+      name,
+      extension: ext,
+      data: data ?? new Uint8Array(0),
+      cursor: 0,
+      mode: mode === 0 ? 'r' : 'w',
+    });
+
+    return handle;
+  }
+
+  /**
+   * Syscall: fread - read from file
+   * Returns number of bytes read, or -1 on error
+   */
+  private syscallFread(handle: number, buffer: number, count: number): number {
+    const fh = this.fileHandles.get(handle);
+    if (!fh || fh.mode !== 'r') {
+      return 0xFFFFFFFF; // Invalid handle or not readable
+    }
+
+    // Read up to count bytes
+    const available = fh.data.length - fh.cursor;
+    const toRead = Math.min(count, available);
+
+    for (let i = 0; i < toRead; i++) {
+      this.writeByte(buffer + i, fh.data[fh.cursor++]);
+    }
+
+    return toRead;
+  }
+
+  /**
+   * Syscall: fwrite - write to file
+   * Returns number of bytes written, or -1 on error
+   */
+  private syscallFwrite(handle: number, buffer: number, count: number): number {
+    const fh = this.fileHandles.get(handle);
+    if (!fh || fh.mode !== 'w') {
+      return 0xFFFFFFFF; // Invalid handle or not writable
+    }
+
+    // Extend data buffer if needed
+    const newSize = fh.cursor + count;
+    if (newSize > fh.data.length) {
+      const newData = new Uint8Array(newSize);
+      newData.set(fh.data);
+      fh.data = newData;
+    }
+
+    // Write bytes
+    for (let i = 0; i < count; i++) {
+      fh.data[fh.cursor++] = this.readByte(buffer + i);
+    }
+
+    return count;
+  }
+
+  /**
+   * Syscall: fclose - close file
+   * Returns 0 on success, -1 on error
+   */
+  private syscallFclose(handle: number): number {
+    const fh = this.fileHandles.get(handle);
+    if (!fh) {
+      return 0xFFFFFFFF; // Invalid handle
+    }
+
+    // If write mode, save file to filesystem
+    if (fh.mode === 'w' && this.filesystem) {
+      if (!this.filesystem.fileExists(fh.name, fh.extension)) {
+        this.filesystem.createFile(fh.name, fh.extension);
+      }
+      this.filesystem.writeFile(fh.name, fh.extension, fh.data);
+    }
+
+    this.fileHandles.delete(handle);
+    return 0;
+  }
+
+  /**
+   * Syscall: readdir - read directory entry
+   * Returns 1 if entry read, 0 if no more entries, -1 on error
+   */
+  private syscallReaddir(nameBuffer: number, extBuffer: number, sizeBuffer: number): number {
+    if (!this.filesystem) {
+      return 0xFFFFFFFF; // No filesystem
+    }
+
+    // Initialize directory iteration on first call
+    if (!this.dirFileList) {
+      this.dirFileList = this.filesystem.listFiles();
+      this.dirIterator = 0;
+    }
+
+    // Check if more entries
+    if (this.dirIterator >= this.dirFileList.length) {
+      // Reset for next iteration
+      this.dirFileList = null;
+      this.dirIterator = 0;
+      return 0; // No more entries
+    }
+
+    // Get current entry
+    const file = this.dirFileList[this.dirIterator++];
+
+    // Write name (8 bytes, padded with spaces)
+    const name = file.name.padEnd(8, ' ');
+    for (let i = 0; i < 8; i++) {
+      this.writeByte(nameBuffer + i, name.charCodeAt(i));
+    }
+
+    // Write extension (3 bytes, padded with spaces)
+    const ext = file.extension.padEnd(3, ' ');
+    for (let i = 0; i < 3; i++) {
+      this.writeByte(extBuffer + i, ext.charCodeAt(i));
+    }
+
+    // Write size (4 bytes, little-endian)
+    this.writeByte(sizeBuffer + 0, file.size & 0xFF);
+    this.writeByte(sizeBuffer + 1, (file.size >> 8) & 0xFF);
+    this.writeByte(sizeBuffer + 2, (file.size >> 16) & 0xFF);
+    this.writeByte(sizeBuffer + 3, (file.size >> 24) & 0xFF);
+
+    return 1; // Entry read successfully
+  }
+
+  /**
+   * Syscall: putd - print decimal number
+   */
+  private syscallPutd(value: number): void {
+    // Convert to unsigned 32-bit if negative (two's complement)
+    const num = value >>> 0;
+
+    // Convert to decimal string
+    const str = num.toString(10);
+
+    // Print each digit
+    for (let i = 0; i < str.length; i++) {
+      this.syscallPutchar(str.charCodeAt(i));
+    }
+  }
+
+  /**
+   * Syscall: assemble - assemble source code
+   */
+  private syscallAssemble(sourceBuffer: number, outputBuffer: number, maxOutputSize: number): number {
+    try {
+      // Read null-terminated source string from memory
+      let source = '';
+      let addr = sourceBuffer;
+      while (true) {
+        const byte = this.readByte(addr++);
+        if (byte === 0) break;
+        source += String.fromCharCode(byte);
+      }
+
+      // Assemble using NativeAssembler
+      const asm = new NativeAssembler();
+      const code = asm.assemble(source);
+
+      // Check if output fits
+      if (code.length > maxOutputSize) {
+        return 0xFFFFFFFF; // Error: output too large
+      }
+
+      // Write assembled code to output buffer
+      for (let i = 0; i < code.length; i++) {
+        this.writeByte(outputBuffer + i, code[i]);
+      }
+
+      return code.length;
+    } catch (err) {
+      // Assembly error - could log the error for debugging
+      // console.error('Assembly error:', err);
+      return 0xFFFFFFFF;
+    }
   }
 }

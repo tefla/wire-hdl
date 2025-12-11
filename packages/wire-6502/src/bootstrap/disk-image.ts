@@ -42,6 +42,19 @@ import TEST_ASM from '../../asm/test.asm?raw';
 import BEEP_ASM from '../../asm/beep.asm?raw';
 import CD_ASM from '../../asm/cd.asm?raw';
 import MKDIR_ASM from '../../asm/mkdir.asm?raw';
+// ASM2 and test files
+import ASM2_ASM from '../../asm/asm2.asm?raw';
+import TESTNOP_ASM from '../../asm/testnop.asm?raw';
+import TESTLDA_ASM from '../../asm/testlda.asm?raw';
+import TESTBR_ASM from '../../asm/testbr.asm?raw';
+import TESTERR_ASM from '../../asm/testerr.asm?raw';
+import TESTDB_ASM from '../../asm/testdb.asm?raw';
+import TESTDB2_ASM from '../../asm/testdb2.asm?raw';
+import TESTFWD_ASM from '../../asm/testfwd.asm?raw';
+import TESTDW_ASM from '../../asm/testdw.asm?raw';
+import TESTBIG_ASM from '../../asm/testbig.asm?raw';
+import TESTSTR_ASM from '../../asm/teststr.asm?raw';
+import TESTFWDLO_ASM from '../../asm/testfwdlo.asm?raw';
 // Source code for distribution
 import SHELL_ASM from '../../asm/shell-boot.asm?raw';
 import ASM_ASM from '../../asm/asm.asm?raw';
@@ -231,6 +244,7 @@ export function createFloppyDisk(): Uint8Array[] {
   const shellResult = assembleShell();
   const asm0Result = assembleStage0();
   const asmResult = assemble(ASM_ASM);  // Stage 1 assembler (self-hosting)
+  const asm2Result = assemble(ASM2_ASM); // Stage 2 assembler (compiled by stage0)
   const editResult = assembleEdit();
   const cdResult = assemble(CD_ASM);
   const mkdirResult = assemble(MKDIR_ASM);
@@ -242,27 +256,40 @@ export function createFloppyDisk(): Uint8Array[] {
   const BITMAP_SECTORS = WIREFS.BITMAP_SECTORS; // 16
   const DATA_START = WIREFS.DATA_START;    // 20
 
-  // Index 9 will be SRC directory (after the first 9 files 0-8)
-  const SRC_DIR_INDEX = 9;
+  // Index 16 will be SRC directory (after the first 16 files 0-15)
+  const SRC_DIR_INDEX = 21;  // Updated after adding TESTFWDL.ASM
   const files: FileEntry[] = [
-    // Root files (indices 0-8)
+    // Root files (indices 0-15)
     // SHELL.COM must be first so boot loader can find it easily
-    { name: 'SHELL', ext: 'COM', data: shellResult.bytes },
-    { name: 'ASM', ext: 'COM', data: asmResult.bytes },  // Stage 1 assembler
-    { name: 'ASM0', ext: 'COM', data: asm0Result.bytes }, // Placeholder
-    { name: 'EDIT', ext: 'COM', data: editResult.bytes },
-    { name: 'CD', ext: 'COM', data: cdResult.bytes },
-    { name: 'MKDIR', ext: 'COM', data: mkdirResult.bytes },
-    { name: 'HELLO', ext: 'ASM', data: textToBytes(HELLO_ASM) },
-    { name: 'TEST', ext: 'ASM', data: textToBytes(TEST_ASM) },
-    { name: 'BEEP', ext: 'ASM', data: textToBytes(BEEP_ASM) },
-    // SRC directory (index 9)
+    { name: 'SHELL', ext: 'COM', data: shellResult.bytes },       // 0
+    { name: 'ASM', ext: 'COM', data: asmResult.bytes },           // 1 - Stage 1 assembler
+    { name: 'ASM0', ext: 'COM', data: asm0Result.bytes },         // 2 - Placeholder
+    { name: 'ASM2', ext: 'COM', data: asm2Result.bytes },         // 3 - Stage 2 assembler
+    { name: 'EDIT', ext: 'COM', data: editResult.bytes },         // 4
+    { name: 'CD', ext: 'COM', data: cdResult.bytes },             // 5
+    { name: 'MKDIR', ext: 'COM', data: mkdirResult.bytes },       // 6
+    { name: 'HELLO', ext: 'ASM', data: textToBytes(HELLO_ASM) },  // 7
+    { name: 'TEST', ext: 'ASM', data: textToBytes(TEST_ASM) },    // 8
+    { name: 'BEEP', ext: 'ASM', data: textToBytes(BEEP_ASM) },    // 9
+    // ASM2 test files for Stage 2 assembler
+    { name: 'TESTNOP', ext: 'ASM', data: textToBytes(TESTNOP_ASM) }, // 10
+    { name: 'TESTLDA', ext: 'ASM', data: textToBytes(TESTLDA_ASM) }, // 11
+    { name: 'TESTBR', ext: 'ASM', data: textToBytes(TESTBR_ASM) },   // 12
+    { name: 'TESTERR', ext: 'ASM', data: textToBytes(TESTERR_ASM) }, // 13
+    { name: 'TESTDB', ext: 'ASM', data: textToBytes(TESTDB_ASM) },   // 14
+    { name: 'TESTDB2', ext: 'ASM', data: textToBytes(TESTDB2_ASM) }, // 15
+    { name: 'TESTFWD', ext: 'ASM', data: textToBytes(TESTFWD_ASM) }, // 16
+    { name: 'TESTDW', ext: 'ASM', data: textToBytes(TESTDW_ASM) },   // 17
+    { name: 'TESTBIG', ext: 'ASM', data: textToBytes(TESTBIG_ASM) }, // 18
+    { name: 'TESTSTR', ext: 'ASM', data: textToBytes(TESTSTR_ASM) }, // 19
+    { name: 'TESTFWDL', ext: 'ASM', data: textToBytes(TESTFWDLO_ASM) }, // 20 - forward ref with < >
+    // SRC directory (index 21)
     { name: 'SRC', ext: '', data: new Uint8Array(0), isDirectory: true },
-    // Files in SRC/ (indices 10+)
-    { name: 'SHELL', ext: 'ASM', data: textToBytes(SHELL_ASM), parentIndex: SRC_DIR_INDEX },
+    // Files in SRC/ (indices 15+)
+    // ASM.ASM included for self-hosting demo (75KB)
     { name: 'ASM', ext: 'ASM', data: textToBytes(ASM_ASM), parentIndex: SRC_DIR_INDEX },
+    { name: 'ASM2', ext: 'ASM', data: textToBytes(ASM2_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'ASM0', ext: 'ASM', data: textToBytes(ASM0_ASM), parentIndex: SRC_DIR_INDEX },
-    { name: 'EDIT', ext: 'ASM', data: textToBytes(EDIT_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'BOOTLOAD', ext: 'ASM', data: textToBytes(BOOTLOAD_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'HEXLOAD', ext: 'ASM', data: textToBytes(HEXLOAD_ASM), parentIndex: SRC_DIR_INDEX },
     { name: 'CD', ext: 'ASM', data: textToBytes(CD_ASM), parentIndex: SRC_DIR_INDEX },
