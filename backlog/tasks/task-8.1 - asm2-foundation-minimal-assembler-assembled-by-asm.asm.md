@@ -1,9 +1,10 @@
 ---
 id: task-8.1
 title: asm2 foundation - minimal assembler assembled by asm.asm
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2025-12-11 09:25'
+updated_date: '2025-12-11 17:56'
 labels:
   - '6502'
   - assembler
@@ -39,3 +40,17 @@ Create the basic asm2 skeleton that can be assembled by asm.asm and assemble sim
 - [ ] #4 Output matches stage0 assembler for identical input
 - [ ] #5 Error messages include line numbers
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Progress (Dec 11)
+- Added ASM2.ASM to disk image SRC directory
+- Fixed 24 label collision groups in asm2.asm (same issue as asm.asm)
+- Stage0 TypeScript assembler successfully assembles asm2.asm to 4894 bytes
+- ASM2.COM is precompiled and functional
+
+**Issue Found:** Native AS.COM fails to assemble asm2.asm with "Undefined symbol at line $008C" error. This affects forward references with < > operators. The stage0 assembler handles this correctly, so ASM2.COM is precompiled by stage0 for now.
+
+TODO: Investigate why native AS.COM fails on asm2.asm forward refs
+<!-- SECTION:NOTES:END -->

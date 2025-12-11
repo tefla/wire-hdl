@@ -12,6 +12,25 @@ describe('EDIT - Text Editor', () => {
       assembler = new NativeAssembler();
     });
 
+    it('should evaluate BUFFER_ADDR>>12 correctly', () => {
+      const source = `
+        BUFFER_ADDR EQU 0x2000
+        LUI a0, BUFFER_ADDR>>12
+        ECALL
+      `;
+      const binary = assembler.assemble(source);
+      cpu.loadProgram(binary, 0x1000);
+      cpu.pc = 0x1000;
+
+      while (cpu.pc !== 0 && cpu.pc < 0x2000) {
+        cpu.step();
+      }
+
+      // BUFFER_ADDR>>12 = 0x2000>>12 = 2
+      // LUI a0, 2 should load 0x2000 into a0
+      expect(cpu.getReg(10)).toBe(0x2000);
+    });
+
     it('should initialize empty text buffer', () => {
       const source = `
         ; Constants using EQU directive
@@ -140,7 +159,10 @@ describe('EDIT - Text Editor', () => {
 
       const binary = assembler.assemble(source);
       cpu.loadProgram(binary, 0x1000);
-      cpu.pc = 0x1000;
+
+      // Data section: "Hello, World!\0" = 14 bytes
+      // Text section starts at 0x1000 + 14 = 0x100E
+      cpu.pc = 0x1000 + 14;
 
       // Run until ECALL
       let steps = 0;
@@ -240,7 +262,10 @@ describe('EDIT - Text Editor', () => {
 
       const binary = assembler.assemble(source);
       cpu.loadProgram(binary, 0x1000);
-      cpu.pc = 0x1000;
+
+      // Data section: "Test Line\0" = 10 bytes
+      // Text section starts at 0x1000 + 10 = 0x100A
+      cpu.pc = 0x1000 + 10;
 
       // Run until ECALL
       let steps = 0;
@@ -326,7 +351,10 @@ describe('EDIT - Text Editor', () => {
 
       const binary = assembler.assemble(source);
       cpu.loadProgram(binary, 0x1000);
-      cpu.pc = 0x1000;
+
+      // Data section: "Modified\0" = 9 bytes
+      // Text section starts at 0x1000 + 9 = 0x1009
+      cpu.pc = 0x1000 + 9;
 
       // Run until ECALL
       let steps = 0;
@@ -424,7 +452,10 @@ describe('EDIT - Text Editor', () => {
 
       const binary = assembler.assemble(source);
       cpu.loadProgram(binary, 0x1000);
-      cpu.pc = 0x1000;
+
+      // Data section: "First line\0" (11) + "Second line\0" (12) + "Third line\0" (11) = 34 bytes
+      // Text section starts at 0x1000 + 34 = 0x1022
+      cpu.pc = 0x1000 + 34;
 
       // Run until ECALL
       let steps = 0;
