@@ -1,7 +1,7 @@
 ---
 id: task-24
 title: Program loader
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 16:00'
 labels:
@@ -48,18 +48,18 @@ Offset  Size  Description
 
 ## Subtasks
 
-- [ ] task-24.1: Define executable format and header structure
-- [ ] task-24.2: Implement loader in shell/OS
-- [ ] task-24.3: Create tool to build executable images
+- [x] task-24.1: Define executable format and header structure
+- [x] task-24.2: Implement loader in shell/OS
+- [x] task-24.3: Create tool to build executable images (ExecutableBuilder)
 
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE_CRITERIA:BEGIN -->
-- [ ] Executable format is documented
-- [ ] Loader validates executable header
-- [ ] Loader correctly loads code and data
-- [ ] BSS section is zeroed
-- [ ] Stack is set up correctly
-- [ ] Program executes and can return to shell
-- [ ] 10+ tests for loader
+- [x] Executable format is documented (RISV format with 24-byte header)
+- [x] Loader validates executable header (magic number check)
+- [x] Loader correctly loads code and data
+- [x] BSS section is zeroed
+- [x] Stack is set up correctly
+- [x] Program executes and can return to shell
+- [x] 10+ tests for loader (17 tests implemented)
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->

@@ -57,6 +57,17 @@ export class KeyboardController {
   }
 
   /**
+   * Read and consume a key from the buffer
+   * Returns 0 if buffer is empty
+   */
+  readKey(): number {
+    if (this.buffer.length > 0) {
+      return this.buffer.shift()!;
+    }
+    return 0;
+  }
+
+  /**
    * Set or clear a modifier key state
    */
   setModifier(modifier: KeyModifier, pressed: boolean): void {

@@ -341,6 +341,13 @@ export class RiscVCpu {
   }
 
   /**
+   * Get total memory size
+   */
+  getMemorySize(): number {
+    return this.memory.length;
+  }
+
+  /**
    * Decode R-type instruction
    */
   private decodeR(instruction: number): {

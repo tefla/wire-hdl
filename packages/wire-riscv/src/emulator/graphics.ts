@@ -549,4 +549,73 @@ export class GraphicsCard {
   getResolution(): { width: number; height: number } {
     return this.resolutions[this.mode];
   }
+
+  /**
+   * Set cursor position
+   */
+  setCursorPosition(x: number, y: number): void {
+    this.cursorX = Math.max(0, Math.min(TEXT_COLS - 1, x));
+    this.cursorY = Math.max(0, Math.min(TEXT_ROWS - 1, y));
+    this.dirty = true;
+  }
+
+  /**
+   * Write a character at cursor position and advance cursor
+   * Handles special characters (newline, backspace, tab)
+   */
+  putcharWithCursor(char: number): void {
+    if (char === 0x0A || char === 0x0D) {
+      // Newline/CR - move to start of next line
+      this.cursorX = 0;
+      this.cursorY++;
+    } else if (char === 0x08) {
+      // Backspace - move back and clear
+      if (this.cursorX > 0) {
+        this.cursorX--;
+        this.writeTextVram(this.cursorX, this.cursorY, 0x20, 0x07);
+      }
+    } else if (char === 0x09) {
+      // Tab - advance to next 8-column boundary
+      this.cursorX = (Math.floor(this.cursorX / 8) + 1) * 8;
+      if (this.cursorX >= TEXT_COLS) {
+        this.cursorX = 0;
+        this.cursorY++;
+      }
+    } else {
+      // Regular character
+      this.writeTextVram(this.cursorX, this.cursorY, char, 0x07);
+      this.cursorX++;
+      if (this.cursorX >= TEXT_COLS) {
+        this.cursorX = 0;
+        this.cursorY++;
+      }
+    }
+
+    // Handle scroll if needed
+    if (this.cursorY >= TEXT_ROWS) {
+      this.scrollUp();
+      this.cursorY = TEXT_ROWS - 1;
+    }
+    this.dirty = true;
+  }
+
+  /**
+   * Scroll screen up by one line
+   */
+  private scrollUp(): void {
+    // Move all lines up by 1
+    for (let y = 0; y < TEXT_ROWS - 1; y++) {
+      for (let x = 0; x < TEXT_COLS; x++) {
+        const srcOffset = ((y + 1) * TEXT_COLS + x) * 2;
+        const dstOffset = (y * TEXT_COLS + x) * 2;
+        this.textVram[dstOffset] = this.textVram[srcOffset];
+        this.textVram[dstOffset + 1] = this.textVram[srcOffset + 1];
+      }
+    }
+    // Clear last line
+    const lastLineY = TEXT_ROWS - 1;
+    for (let x = 0; x < TEXT_COLS; x++) {
+      this.writeTextVram(x, lastLineY, 0x20, 0x07);
+    }
+  }
 }

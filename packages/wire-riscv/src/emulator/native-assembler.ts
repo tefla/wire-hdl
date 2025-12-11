@@ -1,0 +1,563 @@
+/**
+ * Native RISC-V Assembler
+ *
+ * A simplified assembler that can run within the RISC-V emulator,
+ * enabling self-hosting development.
+ *
+ * Supports:
+ * - Basic RV32I instructions
+ * - Labels (forward and backward)
+ * - Directives (.byte, .word, .ascii, .asciiz, .space)
+ * - Register aliases (x0-x31 and ABI names)
+ * - Comments (; and #)
+ */
+
+import { RiscVCpu } from './cpu.js';
+import { WireFS } from './filesystem.js';
+
+/** Syscall numbers for assembler operations */
+export const NATIVE_ASM_SYSCALLS = {
+  ASM_INIT: 100,
+  ASM_LINE: 101,
+  ASM_FINISH: 102,
+} as const;
+
+/**
+ * Assembler error class
+ */
+export class AssemblerError extends Error {
+  constructor(
+    message: string,
+    public line?: number,
+    public source?: string
+  ) {
+    super(line !== undefined ? `Line ${line}: ${message}` : message);
+    this.name = 'AssemblerError';
+  }
+}
+
+/**
+ * Register name mapping
+ */
+const REGISTERS: Record<string, number> = {
+  // Numeric names
+  x0: 0, x1: 1, x2: 2, x3: 3, x4: 4, x5: 5, x6: 6, x7: 7,
+  x8: 8, x9: 9, x10: 10, x11: 11, x12: 12, x13: 13, x14: 14, x15: 15,
+  x16: 16, x17: 17, x18: 18, x19: 19, x20: 20, x21: 21, x22: 22, x23: 23,
+  x24: 24, x25: 25, x26: 26, x27: 27, x28: 28, x29: 29, x30: 30, x31: 31,
+  // ABI names
+  zero: 0, ra: 1, sp: 2, gp: 3, tp: 4,
+  t0: 5, t1: 6, t2: 7,
+  s0: 8, fp: 8, s1: 9,
+  a0: 10, a1: 11, a2: 12, a3: 13, a4: 14, a5: 15, a6: 16, a7: 17,
+  s2: 18, s3: 19, s4: 20, s5: 21, s6: 22, s7: 23, s8: 24, s9: 25, s10: 26, s11: 27,
+  t3: 28, t4: 29, t5: 30, t6: 31,
+};
+
+/**
+ * Native RISC-V Assembler
+ */
+export class NativeAssembler {
+  private labels: Map<string, number> = new Map();
+  private pendingLabels: Array<{ offset: number; label: string; type: 'J' | 'B'; line: number }> = [];
+  private output: number[] = [];
+  private currentLine: number = 0;
+
+  constructor(
+    private cpu?: RiscVCpu,
+    private fs?: WireFS
+  ) {}
+
+  /**
+   * Assemble source code to binary
+   */
+  assemble(source: string): Uint8Array {
+    this.labels.clear();
+    this.pendingLabels = [];
+    this.output = [];
+    this.currentLine = 0;
+
+    const lines = source.split('\n');
+
+    // First pass: collect labels and emit code
+    for (let i = 0; i < lines.length; i++) {
+      this.currentLine = i + 1;
+      this.processLine(lines[i]);
+    }
+
+    // Second pass: resolve pending labels
+    for (const pending of this.pendingLabels) {
+      const targetAddr = this.labels.get(pending.label);
+      if (targetAddr === undefined) {
+        throw new AssemblerError(`Undefined label: ${pending.label}`, pending.line);
+      }
+
+      const offset = targetAddr - pending.offset;
+      this.patchBranch(pending.offset, offset, pending.type);
+    }
+
+    return new Uint8Array(this.output);
+  }
+
+  /**
+   * Assemble from filesystem
+   */
+  assembleFile(name: string, extension: string): Uint8Array | null {
+    if (!this.fs) {
+      throw new AssemblerError('No filesystem available');
+    }
+
+    const data = this.fs.readFile(name, extension);
+    if (!data) {
+      return null;
+    }
+
+    const source = new TextDecoder().decode(data);
+    return this.assemble(source);
+  }
+
+  /**
+   * Assemble and write to filesystem
+   */
+  assembleToFile(source: string, name: string, extension: string): boolean {
+    if (!this.fs) {
+      throw new AssemblerError('No filesystem available');
+    }
+
+    const binary = this.assemble(source);
+    this.fs.createFile(name, extension);
+    return this.fs.writeFile(name, extension, binary);
+  }
+
+  /**
+   * Process a single line of source
+   */
+  private processLine(line: string): void {
+    // Remove comments
+    line = line.replace(/[;#].*$/, '').trim();
+
+    if (!line) {
+      return;
+    }
+
+    // Check for label
+    const labelMatch = line.match(/^(\w+):\s*(.*)/);
+    if (labelMatch) {
+      this.labels.set(labelMatch[1], this.output.length);
+      line = labelMatch[2].trim();
+      if (!line) {
+        return;
+      }
+    }
+
+    // Check for directive
+    if (line.startsWith('.')) {
+      this.processDirective(line);
+      return;
+    }
+
+    // Process instruction
+    this.processInstruction(line);
+  }
+
+  /**
+   * Process directive
+   */
+  private processDirective(line: string): void {
+    const parts = line.split(/\s+/, 2);
+    const directive = parts[0].toLowerCase();
+    const args = parts[1] || '';
+
+    switch (directive) {
+      case '.byte':
+        this.output.push(this.parseNumber(args) & 0xFF);
+        break;
+
+      case '.word':
+        this.emitWord(this.parseNumber(args));
+        break;
+
+      case '.ascii':
+      case '.asciiz': {
+        const match = args.match(/"([^"]*)"/);
+        if (!match) {
+          throw new AssemblerError('Invalid string literal', this.currentLine);
+        }
+        for (const char of match[1]) {
+          this.output.push(char.charCodeAt(0));
+        }
+        if (directive === '.asciiz') {
+          this.output.push(0);
+        }
+        break;
+      }
+
+      case '.space': {
+        const size = this.parseNumber(args);
+        for (let i = 0; i < size; i++) {
+          this.output.push(0);
+        }
+        break;
+      }
+
+      default:
+        throw new AssemblerError(`Unknown directive: ${directive}`, this.currentLine);
+    }
+  }
+
+  /**
+   * Process instruction
+   */
+  private processInstruction(line: string): void {
+    const parts = line.split(/[\s,]+/).filter((p) => p);
+    if (parts.length === 0) {
+      return;
+    }
+
+    const mnemonic = parts[0].toUpperCase();
+    const operands = parts.slice(1);
+
+    switch (mnemonic) {
+      case 'NOP':
+        this.emitWord(0x00000013); // ADDI x0, x0, 0
+        break;
+
+      case 'LUI':
+        this.emitLUI(operands);
+        break;
+
+      case 'AUIPC':
+        this.emitAUIPC(operands);
+        break;
+
+      case 'JAL':
+        this.emitJAL(operands);
+        break;
+
+      case 'JALR':
+        this.emitJALR(operands);
+        break;
+
+      case 'BEQ':
+      case 'BNE':
+      case 'BLT':
+      case 'BGE':
+      case 'BLTU':
+      case 'BGEU':
+        this.emitBranch(mnemonic, operands);
+        break;
+
+      case 'LB':
+      case 'LH':
+      case 'LW':
+      case 'LBU':
+      case 'LHU':
+        this.emitLoad(mnemonic, operands);
+        break;
+
+      case 'SB':
+      case 'SH':
+      case 'SW':
+        this.emitStore(mnemonic, operands);
+        break;
+
+      case 'ADDI':
+      case 'SLTI':
+      case 'SLTIU':
+      case 'XORI':
+      case 'ORI':
+      case 'ANDI':
+      case 'SLLI':
+      case 'SRLI':
+      case 'SRAI':
+        this.emitImmALU(mnemonic, operands);
+        break;
+
+      case 'ADD':
+      case 'SUB':
+      case 'SLL':
+      case 'SLT':
+      case 'SLTU':
+      case 'XOR':
+      case 'SRL':
+      case 'SRA':
+      case 'OR':
+      case 'AND':
+        this.emitRegALU(mnemonic, operands);
+        break;
+
+      case 'ECALL':
+        this.emitWord(0x00000073);
+        break;
+
+      case 'EBREAK':
+        this.emitWord(0x00100073);
+        break;
+
+      default:
+        throw new AssemblerError(`Unknown instruction: ${mnemonic}`, this.currentLine);
+    }
+  }
+
+  private emitLUI(operands: string[]): void {
+    if (operands.length !== 2) {
+      throw new AssemblerError('LUI requires 2 operands', this.currentLine);
+    }
+    const rd = this.parseRegister(operands[0]);
+    const imm = this.parseNumber(operands[1]);
+    // U-type: imm[31:12] | rd | opcode
+    const inst = ((imm & 0xFFFFF) << 12) | (rd << 7) | 0x37;
+    this.emitWord(inst);
+  }
+
+  private emitAUIPC(operands: string[]): void {
+    if (operands.length !== 2) {
+      throw new AssemblerError('AUIPC requires 2 operands', this.currentLine);
+    }
+    const rd = this.parseRegister(operands[0]);
+    const imm = this.parseNumber(operands[1]);
+    const inst = ((imm & 0xFFFFF) << 12) | (rd << 7) | 0x17;
+    this.emitWord(inst);
+  }
+
+  private emitJAL(operands: string[]): void {
+    if (operands.length !== 2) {
+      throw new AssemblerError('JAL requires 2 operands', this.currentLine);
+    }
+    const rd = this.parseRegister(operands[0]);
+    const target = operands[1];
+
+    // Check if target is a label
+    if (this.labels.has(target)) {
+      const imm = this.labels.get(target)! - this.output.length;
+      this.emitWord(this.encodeJAL(rd, imm));
+    } else if (/^[a-zA-Z_]\w*$/.test(target)) {
+      // Forward reference
+      this.pendingLabels.push({
+        offset: this.output.length,
+        label: target,
+        type: 'J',
+        line: this.currentLine,
+      });
+      this.emitWord(this.encodeJAL(rd, 0)); // Placeholder
+    } else {
+      // Immediate value
+      const imm = this.parseNumber(target);
+      this.emitWord(this.encodeJAL(rd, imm));
+    }
+  }
+
+  private encodeJAL(rd: number, imm: number): number {
+    // J-type encoding
+    const bit20 = (imm >> 20) & 1;
+    const bits10_1 = (imm >> 1) & 0x3FF;
+    const bit11 = (imm >> 11) & 1;
+    const bits19_12 = (imm >> 12) & 0xFF;
+    return (bit20 << 31) | (bits10_1 << 21) | (bit11 << 20) | (bits19_12 << 12) | (rd << 7) | 0x6F;
+  }
+
+  private emitJALR(operands: string[]): void {
+    if (operands.length !== 3) {
+      throw new AssemblerError('JALR requires 3 operands', this.currentLine);
+    }
+    const rd = this.parseRegister(operands[0]);
+    const rs1 = this.parseRegister(operands[1]);
+    const imm = this.parseNumber(operands[2]);
+    // I-type
+    const inst = ((imm & 0xFFF) << 20) | (rs1 << 15) | (0 << 12) | (rd << 7) | 0x67;
+    this.emitWord(inst);
+  }
+
+  private emitBranch(mnemonic: string, operands: string[]): void {
+    if (operands.length !== 3) {
+      throw new AssemblerError(`${mnemonic} requires 3 operands`, this.currentLine);
+    }
+    const rs1 = this.parseRegister(operands[0]);
+    const rs2 = this.parseRegister(operands[1]);
+    const target = operands[2];
+
+    const funct3Map: Record<string, number> = {
+      BEQ: 0, BNE: 1, BLT: 4, BGE: 5, BLTU: 6, BGEU: 7,
+    };
+    const funct3 = funct3Map[mnemonic];
+
+    // Check if target is a label
+    if (this.labels.has(target)) {
+      const imm = this.labels.get(target)! - this.output.length;
+      this.emitWord(this.encodeBranch(rs1, rs2, imm, funct3));
+    } else if (/^[a-zA-Z_]\w*$/.test(target)) {
+      // Forward reference
+      this.pendingLabels.push({
+        offset: this.output.length,
+        label: target,
+        type: 'B',
+        line: this.currentLine,
+      });
+      this.emitWord(this.encodeBranch(rs1, rs2, 0, funct3)); // Placeholder
+    } else {
+      // Immediate value
+      const imm = this.parseNumber(target);
+      this.emitWord(this.encodeBranch(rs1, rs2, imm, funct3));
+    }
+  }
+
+  private encodeBranch(rs1: number, rs2: number, imm: number, funct3: number): number {
+    // B-type encoding
+    const bit12 = (imm >> 12) & 1;
+    const bits10_5 = (imm >> 5) & 0x3F;
+    const bits4_1 = (imm >> 1) & 0xF;
+    const bit11 = (imm >> 11) & 1;
+    return (bit12 << 31) | (bits10_5 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (bits4_1 << 8) | (bit11 << 7) | 0x63;
+  }
+
+  private emitLoad(mnemonic: string, operands: string[]): void {
+    if (operands.length !== 2) {
+      throw new AssemblerError(`${mnemonic} requires 2 operands`, this.currentLine);
+    }
+    const rd = this.parseRegister(operands[0]);
+    const { offset, base } = this.parseMemoryOperand(operands[1]);
+
+    const funct3Map: Record<string, number> = {
+      LB: 0, LH: 1, LW: 2, LBU: 4, LHU: 5,
+    };
+    const funct3 = funct3Map[mnemonic];
+
+    // I-type
+    const inst = ((offset & 0xFFF) << 20) | (base << 15) | (funct3 << 12) | (rd << 7) | 0x03;
+    this.emitWord(inst);
+  }
+
+  private emitStore(mnemonic: string, operands: string[]): void {
+    if (operands.length !== 2) {
+      throw new AssemblerError(`${mnemonic} requires 2 operands`, this.currentLine);
+    }
+    const rs2 = this.parseRegister(operands[0]);
+    const { offset, base } = this.parseMemoryOperand(operands[1]);
+
+    const funct3Map: Record<string, number> = {
+      SB: 0, SH: 1, SW: 2,
+    };
+    const funct3 = funct3Map[mnemonic];
+
+    // S-type
+    const imm11_5 = (offset >> 5) & 0x7F;
+    const imm4_0 = offset & 0x1F;
+    const inst = (imm11_5 << 25) | (rs2 << 20) | (base << 15) | (funct3 << 12) | (imm4_0 << 7) | 0x23;
+    this.emitWord(inst);
+  }
+
+  private emitImmALU(mnemonic: string, operands: string[]): void {
+    if (operands.length !== 3) {
+      throw new AssemblerError(`${mnemonic} requires 3 operands`, this.currentLine);
+    }
+    const rd = this.parseRegister(operands[0]);
+    const rs1 = this.parseRegister(operands[1]);
+    const imm = this.parseNumber(operands[2]);
+
+    const funct3Map: Record<string, number> = {
+      ADDI: 0, SLTI: 2, SLTIU: 3, XORI: 4, ORI: 6, ANDI: 7,
+      SLLI: 1, SRLI: 5, SRAI: 5,
+    };
+    const funct3 = funct3Map[mnemonic];
+
+    let finalImm = imm & 0xFFF;
+    if (mnemonic === 'SRAI') {
+      finalImm = (imm & 0x1F) | 0x400; // Set bit 10 for arithmetic shift
+    } else if (mnemonic === 'SLLI' || mnemonic === 'SRLI') {
+      finalImm = imm & 0x1F;
+    }
+
+    // I-type
+    const inst = (finalImm << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | 0x13;
+    this.emitWord(inst);
+  }
+
+  private emitRegALU(mnemonic: string, operands: string[]): void {
+    if (operands.length !== 3) {
+      throw new AssemblerError(`${mnemonic} requires 3 operands`, this.currentLine);
+    }
+    const rd = this.parseRegister(operands[0]);
+    const rs1 = this.parseRegister(operands[1]);
+    const rs2 = this.parseRegister(operands[2]);
+
+    const funct3Map: Record<string, number> = {
+      ADD: 0, SUB: 0, SLL: 1, SLT: 2, SLTU: 3,
+      XOR: 4, SRL: 5, SRA: 5, OR: 6, AND: 7,
+    };
+    const funct3 = funct3Map[mnemonic];
+
+    let funct7 = 0;
+    if (mnemonic === 'SUB' || mnemonic === 'SRA') {
+      funct7 = 0x20;
+    }
+
+    // R-type
+    const inst = (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | 0x33;
+    this.emitWord(inst);
+  }
+
+  private parseRegister(name: string): number {
+    const normalized = name.toLowerCase();
+    if (!(normalized in REGISTERS)) {
+      throw new AssemblerError(`Invalid register: ${name}`, this.currentLine);
+    }
+    return REGISTERS[normalized];
+  }
+
+  private parseNumber(str: string): number {
+    str = str.trim();
+    if (str.startsWith('0x') || str.startsWith('0X')) {
+      return parseInt(str.slice(2), 16);
+    }
+    if (str.startsWith('-')) {
+      return parseInt(str, 10);
+    }
+    return parseInt(str, 10);
+  }
+
+  private parseMemoryOperand(operand: string): { offset: number; base: number } {
+    // Format: offset(reg) or just (reg)
+    const match = operand.match(/(-?\d+|0x[0-9a-fA-F]+)?\((\w+)\)/);
+    if (!match) {
+      throw new AssemblerError(`Invalid memory operand: ${operand}`, this.currentLine);
+    }
+    const offset = match[1] ? this.parseNumber(match[1]) : 0;
+    const base = this.parseRegister(match[2]);
+    return { offset, base };
+  }
+
+  private emitWord(value: number): void {
+    this.output.push(value & 0xFF);
+    this.output.push((value >> 8) & 0xFF);
+    this.output.push((value >> 16) & 0xFF);
+    this.output.push((value >> 24) & 0xFF);
+  }
+
+  private patchBranch(offset: number, imm: number, type: 'J' | 'B'): void {
+    // Read existing instruction
+    const existing =
+      this.output[offset] |
+      (this.output[offset + 1] << 8) |
+      (this.output[offset + 2] << 16) |
+      (this.output[offset + 3] << 24);
+
+    let patched: number;
+    if (type === 'J') {
+      // Extract rd from existing JAL
+      const rd = (existing >> 7) & 0x1F;
+      patched = this.encodeJAL(rd, imm);
+    } else {
+      // Extract rs1, rs2, funct3 from existing branch
+      const rs1 = (existing >> 15) & 0x1F;
+      const rs2 = (existing >> 20) & 0x1F;
+      const funct3 = (existing >> 12) & 0x7;
+      patched = this.encodeBranch(rs1, rs2, imm, funct3);
+    }
+
+    // Write back
+    this.output[offset] = patched & 0xFF;
+    this.output[offset + 1] = (patched >> 8) & 0xFF;
+    this.output[offset + 2] = (patched >> 16) & 0xFF;
+    this.output[offset + 3] = (patched >> 24) & 0xFF;
+  }
+}

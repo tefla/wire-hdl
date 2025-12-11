@@ -1,7 +1,7 @@
 ---
 id: task-23
 title: Simple bootloader
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 16:00'
 labels:
@@ -46,11 +46,11 @@ Implement a simple bootloader that initializes the system and loads the shell or
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE_CRITERIA:BEGIN -->
-- [ ] CPU boots and runs bootloader
-- [ ] Bootloader initializes stack
-- [ ] Bootloader displays boot message
-- [ ] Bootloader loads program from disk
-- [ ] Control transfers to loaded program
-- [ ] Boot process completes in < 1 second
-- [ ] 10+ tests for bootloader
+- [x] CPU boots and runs bootloader
+- [x] Bootloader initializes stack
+- [x] Bootloader displays boot message
+- [x] Bootloader loads program from disk
+- [x] Control transfers to loaded program
+- [x] Boot process completes in < 1 second (< 50000 cycles)
+- [x] 10+ tests for bootloader (11 tests implemented)
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->
