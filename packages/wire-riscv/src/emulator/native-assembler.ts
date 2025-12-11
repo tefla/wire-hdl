@@ -616,6 +616,11 @@ export class NativeAssembler {
   private parseNumber(str: string): number {
     str = str.trim();
 
+    // Check if it contains expression operators
+    if (/[+\-*\/%&|^<>()]/.test(str)) {
+      return this.evaluateExpression(str);
+    }
+
     // Check if it's a constant
     if (this.constants.has(str)) {
       return this.constants.get(str)!;
@@ -633,6 +638,119 @@ export class NativeAssembler {
       return parseInt(str, 10);
     }
     return parseInt(str, 10);
+  }
+
+  /**
+   * Evaluate arithmetic expression
+   */
+  private evaluateExpression(expr: string): number {
+    // Simple recursive descent parser for expressions
+    expr = expr.trim();
+
+    // Handle parentheses
+    if (expr.startsWith('(') && expr.endsWith(')')) {
+      return this.evaluateExpression(expr.slice(1, -1));
+    }
+
+    // Bitwise OR (lowest precedence)
+    for (let i = expr.length - 1; i >= 0; i--) {
+      if (expr[i] === '|' && !this.isInParens(expr, i)) {
+        const left = this.evaluateExpression(expr.slice(0, i));
+        const right = this.evaluateExpression(expr.slice(i + 1));
+        return left | right;
+      }
+    }
+
+    // Bitwise XOR
+    for (let i = expr.length - 1; i >= 0; i--) {
+      if (expr[i] === '^' && !this.isInParens(expr, i)) {
+        const left = this.evaluateExpression(expr.slice(0, i));
+        const right = this.evaluateExpression(expr.slice(i + 1));
+        return left ^ right;
+      }
+    }
+
+    // Bitwise AND
+    for (let i = expr.length - 1; i >= 0; i--) {
+      if (expr[i] === '&' && !this.isInParens(expr, i)) {
+        const left = this.evaluateExpression(expr.slice(0, i));
+        const right = this.evaluateExpression(expr.slice(i + 1));
+        return left & right;
+      }
+    }
+
+    // Bit shifts
+    for (let i = expr.length - 1; i >= 0; i--) {
+      if (expr.slice(i, i + 2) === '<<' && !this.isInParens(expr, i)) {
+        const left = this.evaluateExpression(expr.slice(0, i));
+        const right = this.evaluateExpression(expr.slice(i + 2));
+        return left << right;
+      }
+      if (expr.slice(i, i + 2) === '>>' && !this.isInParens(expr, i)) {
+        const left = this.evaluateExpression(expr.slice(0, i));
+        const right = this.evaluateExpression(expr.slice(i + 2));
+        return left >> right;
+      }
+    }
+
+    // Addition and subtraction
+    for (let i = expr.length - 1; i >= 0; i--) {
+      if (expr[i] === '+' && !this.isInParens(expr, i) && i > 0) {
+        const left = this.evaluateExpression(expr.slice(0, i));
+        const right = this.evaluateExpression(expr.slice(i + 1));
+        return left + right;
+      }
+      if (expr[i] === '-' && !this.isInParens(expr, i) && i > 0) {
+        const left = this.evaluateExpression(expr.slice(0, i));
+        const right = this.evaluateExpression(expr.slice(i + 1));
+        return left - right;
+      }
+    }
+
+    // Multiplication, division, modulo
+    for (let i = expr.length - 1; i >= 0; i--) {
+      if (expr[i] === '*' && !this.isInParens(expr, i)) {
+        const left = this.evaluateExpression(expr.slice(0, i));
+        const right = this.evaluateExpression(expr.slice(i + 1));
+        return left * right;
+      }
+      if (expr[i] === '/' && !this.isInParens(expr, i)) {
+        const left = this.evaluateExpression(expr.slice(0, i));
+        const right = this.evaluateExpression(expr.slice(i + 1));
+        return Math.floor(left / right);
+      }
+      if (expr[i] === '%' && !this.isInParens(expr, i)) {
+        const left = this.evaluateExpression(expr.slice(0, i));
+        const right = this.evaluateExpression(expr.slice(i + 1));
+        return left % right;
+      }
+    }
+
+    // Base case: single number or constant
+    if (this.constants.has(expr)) {
+      return this.constants.get(expr)!;
+    }
+
+    if (expr.startsWith('0x') || expr.startsWith('0X')) {
+      return parseInt(expr.slice(2), 16);
+    }
+    if (expr.startsWith('-')) {
+      return -this.evaluateExpression(expr.slice(1));
+    }
+
+    return parseInt(expr, 10);
+  }
+
+  /**
+   * Check if position is inside parentheses
+   */
+  private isInParens(expr: string, pos: number): boolean {
+    let depth = 0;
+    for (let i = 0; i < pos; i++) {
+      if (expr[i] === '(') depth++;
+      if (expr[i] === ')') depth--;
+    }
+    return depth > 0;
   }
 
   private parseMemoryOperand(operand: string): { offset: number; base: number } {

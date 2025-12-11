@@ -596,6 +596,126 @@ VALUE2 EQU 20
       expect(readWord(binary, 8)).toBe(0x00000013);
     });
   });
+
+  describe('Expression evaluation', () => {
+    it('should evaluate addition', () => {
+      const source = 'ADDI a0, zero, 10+5';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 15 = 0x00F00513
+      expect(readWord(binary, 0)).toBe(0x00F00513);
+    });
+
+    it('should evaluate subtraction', () => {
+      const source = 'ADDI a0, zero, 20-5';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 15 = 0x00F00513
+      expect(readWord(binary, 0)).toBe(0x00F00513);
+    });
+
+    it('should evaluate multiplication', () => {
+      const source = 'ADDI a0, zero, 5*3';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 15 = 0x00F00513
+      expect(readWord(binary, 0)).toBe(0x00F00513);
+    });
+
+    it('should evaluate division', () => {
+      const source = 'ADDI a0, zero, 30/2';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 15 = 0x00F00513
+      expect(readWord(binary, 0)).toBe(0x00F00513);
+    });
+
+    it('should evaluate modulo', () => {
+      const source = 'ADDI a0, zero, 35%20';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 15 = 0x00F00513
+      expect(readWord(binary, 0)).toBe(0x00F00513);
+    });
+
+    it('should evaluate bitwise AND', () => {
+      const source = 'ADDI a0, zero, 0xFF&0x0F';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 15 = 0x00F00513
+      expect(readWord(binary, 0)).toBe(0x00F00513);
+    });
+
+    it('should evaluate bitwise OR', () => {
+      const source = 'ADDI a0, zero, 0x0A|0x05';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 15 = 0x00F00513
+      expect(readWord(binary, 0)).toBe(0x00F00513);
+    });
+
+    it('should evaluate bitwise XOR', () => {
+      const source = 'ADDI a0, zero, 0x0A^0x05';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 15 = 0x00F00513
+      expect(readWord(binary, 0)).toBe(0x00F00513);
+    });
+
+    it('should evaluate left shift', () => {
+      const source = 'ADDI a0, zero, 3<<2';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 12 = 0x00C00513
+      expect(readWord(binary, 0)).toBe(0x00C00513);
+    });
+
+    it('should evaluate right shift', () => {
+      const source = 'ADDI a0, zero, 60>>2';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 15 = 0x00F00513
+      expect(readWord(binary, 0)).toBe(0x00F00513);
+    });
+
+    it('should respect operator precedence', () => {
+      const source = 'ADDI a0, zero, 2+3*4';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 14 = 0x00E00513
+      expect(readWord(binary, 0)).toBe(0x00E00513);
+    });
+
+    it('should support parentheses', () => {
+      const source = 'ADDI a0, zero, (2+3)*4';
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 20 = 0x01400513
+      expect(readWord(binary, 0)).toBe(0x01400513);
+    });
+
+    it('should use constants in expressions', () => {
+      const source = `
+BUFFER_SIZE EQU 100
+        ADDI a0, zero, BUFFER_SIZE*2
+      `;
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 200 = 0x0C800513
+      expect(readWord(binary, 0)).toBe(0x0C800513);
+    });
+
+    it('should combine constants and literals', () => {
+      const source = `
+BASE EQU 0x1000
+        LUI a0, BASE+0x100
+      `;
+      const binary = assembler.assemble(source);
+
+      // LUI a0, 0x1100 = 0x01100537
+      expect(readWord(binary, 0)).toBe(0x01100537);
+    });
+  });
 });
 
 /**
