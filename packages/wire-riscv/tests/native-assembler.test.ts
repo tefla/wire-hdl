@@ -333,6 +333,49 @@ loop:   ADD x1, x1, x2      ; sum += i
       expect(cpu.getReg(3)).toBe(15);
     });
   });
+
+  describe('EQU constants', () => {
+    it('should define constant with EQU', () => {
+      const source = `
+BUFFER_SIZE EQU 1024
+        ADDI a0, zero, BUFFER_SIZE
+      `;
+      const binary = assembler.assemble(source);
+
+      // ADDI a0, zero, 1024 = 0x40000513
+      expect(readWord(binary, 0)).toBe(0x40000513);
+    });
+
+    it('should use hex constants', () => {
+      const source = `
+BASE_ADDR EQU 0x1000
+        LUI a1, BASE_ADDR
+      `;
+      const binary = assembler.assemble(source);
+
+      // LUI a1, 0x1000 = 0x010005B7
+      expect(readWord(binary, 0)).toBe(0x010005B7);
+    });
+
+    it('should use multiple constants', () => {
+      const source = `
+VALUE1 EQU 10
+VALUE2 EQU 20
+        ADDI a0, zero, VALUE1
+        ADDI a1, zero, VALUE2
+      `;
+      const binary = assembler.assemble(source);
+
+      expect(readWord(binary, 0)).toBe(0x00A00513);  // ADDI a0, zero, 10
+      expect(readWord(binary, 4)).toBe(0x01400593);  // ADDI a1, zero, 20
+    });
+
+    it('should error on undefined constant', () => {
+      const source = 'ADDI a0, zero, UNDEFINED_CONST';
+
+      expect(() => assembler.assemble(source)).toThrow();
+    });
+  });
 });
 
 /**

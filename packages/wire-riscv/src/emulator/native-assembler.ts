@@ -59,6 +59,7 @@ const REGISTERS: Record<string, number> = {
  */
 export class NativeAssembler {
   private labels: Map<string, number> = new Map();
+  private constants: Map<string, number> = new Map();
   private pendingLabels: Array<{ offset: number; label: string; type: 'J' | 'B'; line: number }> = [];
   private output: number[] = [];
   private currentLine: number = 0;
@@ -73,6 +74,7 @@ export class NativeAssembler {
    */
   assemble(source: string): Uint8Array {
     this.labels.clear();
+    this.constants.clear();
     this.pendingLabels = [];
     this.output = [];
     this.currentLine = 0;
@@ -137,6 +139,15 @@ export class NativeAssembler {
     line = line.replace(/[;#].*$/, '').trim();
 
     if (!line) {
+      return;
+    }
+
+    // Check for EQU directive (must come before label check)
+    const equMatch = line.match(/^(\w+)\s+EQU\s+(.+)$/i);
+    if (equMatch) {
+      const name = equMatch[1];
+      const value = this.parseNumber(equMatch[2]);
+      this.constants.set(name, value);
       return;
     }
 
@@ -506,6 +517,17 @@ export class NativeAssembler {
 
   private parseNumber(str: string): number {
     str = str.trim();
+
+    // Check if it's a constant
+    if (this.constants.has(str)) {
+      return this.constants.get(str)!;
+    }
+
+    // Check if it looks like an identifier (not a number)
+    if (/^[a-zA-Z_]\w*$/.test(str)) {
+      throw new AssemblerError(`Undefined constant: ${str}`, this.currentLine);
+    }
+
     if (str.startsWith('0x') || str.startsWith('0X')) {
       return parseInt(str.slice(2), 16);
     }
