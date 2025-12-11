@@ -1,7 +1,7 @@
 ---
 id: task-6.5
 title: 'Graphics: React Screen component with integration tests'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:

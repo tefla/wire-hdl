@@ -1,7 +1,7 @@
 ---
 id: task-6
 title: Graphics card and display subsystem
-status: In Progress
+status: Done
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:
