@@ -1,7 +1,7 @@
 ---
 id: task-29.3
 title: Implement native ls command
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 18:00'
 labels:
@@ -30,8 +30,8 @@ FILENAME.EXT   1234 bytes
 
 ## Acceptance Criteria
 
-- [ ] LS.BIN is a real RISC-V executable
-- [ ] Lists all files on disk
-- [ ] Shows filename and size
-- [ ] Same output as TypeScript built-in version
-- [ ] 3+ tests for native ls
+- [x] LS.BIN is a real RISC-V executable
+- [x] Lists all files on disk
+- [x] Shows filename and size
+- [x] Same output as TypeScript built-in version
+- [x] 3+ tests for native ls

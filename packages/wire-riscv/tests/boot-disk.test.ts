@@ -377,6 +377,36 @@ describe('InteractiveSystem', () => {
       // Should have made syscalls (executed some cycles)
       expect(cpu.cycles).toBeGreaterThan(syscallsBefore);
     });
+
+    it('should run native ls command', () => {
+      typeString(system, 'run LS.BIN\r');
+      system.tick(3000);
+
+      // Check console output contains file listing
+      const output = cpu.consoleOutput;
+      expect(output).toContain('SHELL');
+      expect(output).toContain('bytes');
+    });
+
+    it('should list all files with native ls', () => {
+      typeString(system, 'run LS.BIN\r');
+      system.tick(3000);
+
+      // Should list multiple files
+      const output = cpu.consoleOutput;
+      expect(output).toContain('README');
+      expect(output).toContain('HELLO');
+    });
+
+    it('should show file sizes with native ls', () => {
+      typeString(system, 'run LS.BIN\r');
+      system.tick(3000);
+
+      // Should show size numbers
+      const output = cpu.consoleOutput;
+      // Check for decimal numbers (file sizes)
+      expect(output).toMatch(/\d+ bytes/);
+    });
   });
 });
 

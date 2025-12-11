@@ -133,6 +133,7 @@ export const SYSCALL = {
   FWRITE: 9,
   FCLOSE: 10,
   READDIR: 11,
+  PUTD: 12,
 } as const;
 
 export class RiscVCpu {
@@ -823,6 +824,11 @@ export class RiscVCpu {
         this.setReg(10, this.syscallReaddir(a0, a1, this.getReg(12)));
         return true;
 
+      case SYSCALL.PUTD:
+        // Print decimal: a0=number to print
+        this.syscallPutd(a0);
+        return true;
+
       default:
         // Unknown syscall - return -1
         this.setReg(10, 0xFFFFFFFF);
@@ -1181,5 +1187,21 @@ export class RiscVCpu {
     this.writeByte(sizeBuffer + 3, (file.size >> 24) & 0xFF);
 
     return 1; // Entry read successfully
+  }
+
+  /**
+   * Syscall: putd - print decimal number
+   */
+  private syscallPutd(value: number): void {
+    // Convert to unsigned 32-bit if negative (two's complement)
+    const num = value >>> 0;
+
+    // Convert to decimal string
+    const str = num.toString(10);
+
+    // Print each digit
+    for (let i = 0; i < str.length; i++) {
+      this.syscallPutchar(str.charCodeAt(i));
+    }
   }
 }

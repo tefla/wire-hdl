@@ -198,6 +198,101 @@ exit:   ADDI a7, zero, 0    ; EXIT
       .build();
     this.fs.createFile('CAT', 'BIN');
     this.fs.writeFile('CAT', 'BIN', catExe);
+
+    // LS command - list directory contents
+    // Code is 54 instructions (216 bytes = 0xD8), so data is at 0x1000 + 0xD8 = 0x10D8
+    const lsCode = asm.assemble(`
+; LS - native ls command
+; Lists all files in directory
+
+loop:
+        ; Call readdir syscall
+        LUI a0, 0x2         ; name buffer at 0x2000
+        LUI a1, 0x2         ; ext buffer at 0x2008
+        ADDI a1, a1, 8
+        LUI a2, 0x2         ; size buffer at 0x200B
+        ADDI a2, a2, 11
+        ADDI a7, zero, 11   ; READDIR syscall
+        ECALL
+
+        ; Check if done (returns 0 when no more entries)
+        BEQ a0, zero, done
+
+        ; Print name (8 bytes)
+        LUI s0, 0x2         ; s0 = name buffer
+        ADDI s1, zero, 8    ; counter
+print_name:
+        LBU a0, 0(s0)       ; load byte
+        ADDI a7, zero, 1    ; PUTCHAR
+        ECALL
+        ADDI s0, s0, 1      ; next byte
+        ADDI s1, s1, -1
+        BNE s1, zero, print_name
+
+        ; Print dot
+        ADDI a0, zero, 46    ; ASCII '.'
+        ADDI a7, zero, 1
+        ECALL
+
+        ; Print extension (3 bytes)
+        LUI s0, 0x2
+        ADDI s0, s0, 8      ; ext buffer
+        ADDI s1, zero, 3
+print_ext:
+        LBU a0, 0(s0)
+        ADDI a7, zero, 1
+        ECALL
+        ADDI s0, s0, 1
+        ADDI s1, s1, -1
+        BNE s1, zero, print_ext
+
+        ; Print two spaces
+        ADDI a0, zero, 32    ; ASCII ' '
+        ADDI a7, zero, 1
+        ECALL
+        ECALL
+
+        ; Load size (4 bytes little-endian)
+        LUI s0, 0x2
+        ADDI s0, s0, 11     ; size buffer
+        LBU t0, 0(s0)       ; byte 0
+        LBU t1, 1(s0)       ; byte 1
+        LBU t2, 2(s0)       ; byte 2
+        LBU t3, 3(s0)       ; byte 3
+        SLLI t1, t1, 8
+        SLLI t2, t2, 16
+        SLLI t3, t3, 24
+        OR t0, t0, t1
+        OR t0, t0, t2
+        OR t0, t0, t3       ; t0 = size
+
+        ; Print size using PUTD syscall
+        ADDI a0, t0, 0      ; size in a0
+        ADDI a7, zero, 12   ; PUTD syscall
+        ECALL
+
+        ; Print bytes suffix
+        LUI a0, 0x1         ; data section
+        ADDI a0, a0, 0xD8   ; offset to bytes string (54 instructions = 216 bytes)
+        ADDI a7, zero, 3    ; PUTS
+        ECALL
+
+        ; Loop for next entry
+        JAL zero, loop
+
+done:   ; Exit
+        ADDI a7, zero, 0
+        ECALL
+`);
+
+    const lsData = new TextEncoder().encode(' bytes\n\0');
+    const lsExe = new ExecutableBuilder()
+      .setCode(lsCode)
+      .setData(lsData)
+      .setStackSize(512)
+      .build();
+    this.fs.createFile('LS', 'BIN');
+    this.fs.writeFile('LS', 'BIN', lsExe);
   }
 
   /**
