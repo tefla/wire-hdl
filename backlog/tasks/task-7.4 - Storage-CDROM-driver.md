@@ -1,7 +1,7 @@
 ---
 id: task-7.4
 title: 'Storage: CD-ROM driver with tests'
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:
