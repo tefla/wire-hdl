@@ -1,7 +1,7 @@
 ---
 id: task-6.4
 title: 'Graphics: Hardware cursor and attributes with tests'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2025-12-11 12:00'
 labels:
