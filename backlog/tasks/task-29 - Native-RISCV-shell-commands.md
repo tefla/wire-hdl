@@ -1,7 +1,7 @@
 ---
 id: task-29
 title: Native RISC-V shell commands
-status: Backlog
+status: To Do
 assignee: []
 created_date: '2025-12-11 18:00'
 labels:
