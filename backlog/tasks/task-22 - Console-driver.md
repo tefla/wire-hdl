@@ -1,7 +1,7 @@
 ---
 id: task-22
 title: Console driver
-status: To Do
+status: Done
 assignee: []
 created_date: '2025-12-11 16:00'
 labels:
@@ -40,18 +40,18 @@ Implement a console driver that provides terminal-like functionality on top of t
 
 ## Subtasks
 
-- [ ] task-22.1: Implement putchar with cursor advance and scroll
-- [ ] task-22.2: Implement newline and carriage return handling
-- [ ] task-22.3: Implement backspace handling
-- [ ] task-22.4: Implement line input (getline syscall)
+- [x] task-22.1: Implement putchar with cursor advance and scroll
+- [x] task-22.2: Implement newline and carriage return handling
+- [x] task-22.3: Implement backspace handling
+- [x] task-22.4: Implement line input (getline syscall)
 
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE_CRITERIA:BEGIN -->
-- [ ] Characters appear at cursor and cursor advances
-- [ ] Newline moves to start of next line
-- [ ] Screen scrolls when cursor reaches line 25
-- [ ] Backspace erases previous character
-- [ ] getline reads a full line with editing support
-- [ ] 10+ tests for console operations
+- [x] Characters appear at cursor and cursor advances
+- [x] Newline moves to start of next line
+- [x] Screen scrolls when cursor reaches line 25
+- [x] Backspace erases previous character
+- [x] getline reads a full line with editing support
+- [x] 10+ tests for console operations (24 tests implemented)
 <!-- SECTION:ACCEPTANCE_CRITERIA:END -->

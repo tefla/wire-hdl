@@ -117,6 +117,7 @@ export const SYSCALL = {
   PUTS: 3,
   READ_SECTOR: 4,
   WRITE_SECTOR: 5,
+  GETLINE: 6,
 } as const;
 
 export class RiscVCpu {
@@ -765,6 +766,11 @@ export class RiscVCpu {
         this.setReg(10, this.syscallWriteSector(a0, a1));
         return true;
 
+      case SYSCALL.GETLINE:
+        // Read line into buffer a0 with max length a1
+        this.setReg(10, this.syscallGetline(a0, a1));
+        return true;
+
       default:
         // Unknown syscall - return -1
         this.setReg(10, 0xFFFFFFFF);
@@ -780,17 +786,39 @@ export class RiscVCpu {
     this.consoleOutput += String.fromCharCode(ch);
 
     // Also write to screen VRAM if it's a printable character
-    const cursor = this.gpu.getCursorPosition();
+    let cursor = this.gpu.getCursorPosition();
 
     if (ch === 0x0D || ch === 0x0A) {
       // Carriage return or newline - move to start of next line
       this.gpu.writeRegister(0x04, 0); // CURSOR_X = 0
-      this.gpu.writeRegister(0x08, Math.min(cursor.y + 1, 24)); // CURSOR_Y++
+      const newY = cursor.y + 1;
+      if (newY >= 25) {
+        this.scrollScreen();
+        this.gpu.writeRegister(0x08, 24);
+      } else {
+        this.gpu.writeRegister(0x08, newY);
+      }
     } else if (ch === 0x08) {
       // Backspace - move cursor back
       if (cursor.x > 0) {
         this.gpu.writeRegister(0x04, cursor.x - 1);
         this.gpu.writeTextVram(cursor.x - 1, cursor.y, 0x20, 0x07);
+      }
+    } else if (ch === 0x09) {
+      // Tab - advance to next tab stop (every 8 columns)
+      const newX = (Math.floor(cursor.x / 8) + 1) * 8;
+      if (newX >= 80) {
+        // Line wrap on tab
+        this.gpu.writeRegister(0x04, 0);
+        const newY = cursor.y + 1;
+        if (newY >= 25) {
+          this.scrollScreen();
+          this.gpu.writeRegister(0x08, 24);
+        } else {
+          this.gpu.writeRegister(0x08, newY);
+        }
+      } else {
+        this.gpu.writeRegister(0x04, newX);
       }
     } else if (ch >= 0x20) {
       // Printable character - write to VRAM and advance cursor
@@ -799,10 +827,39 @@ export class RiscVCpu {
       if (newX >= 80) {
         // Line wrap
         this.gpu.writeRegister(0x04, 0);
-        this.gpu.writeRegister(0x08, Math.min(cursor.y + 1, 24));
+        const newY = cursor.y + 1;
+        if (newY >= 25) {
+          this.scrollScreen();
+          this.gpu.writeRegister(0x08, 24);
+        } else {
+          this.gpu.writeRegister(0x08, newY);
+        }
       } else {
         this.gpu.writeRegister(0x04, newX);
       }
+    }
+  }
+
+  /**
+   * Scroll screen up by one line
+   */
+  private scrollScreen(): void {
+    const vram = this.gpu.getTextVram();
+
+    // Copy lines 1-24 to lines 0-23
+    for (let y = 0; y < 24; y++) {
+      for (let x = 0; x < 80; x++) {
+        const srcOffset = ((y + 1) * 80 + x) * 2;
+        const dstOffset = (y * 80 + x) * 2;
+        const char = vram[srcOffset];
+        const attr = vram[srcOffset + 1];
+        this.gpu.writeTextVram(x, y, char, attr);
+      }
+    }
+
+    // Clear last line
+    for (let x = 0; x < 80; x++) {
+      this.gpu.writeTextVram(x, 24, 0x20, 0x07);
     }
   }
 
@@ -863,5 +920,55 @@ export class RiscVCpu {
     } catch {
       return 0xFFFFFFFF; // Error
     }
+  }
+
+  /**
+   * Syscall: getline - read a line of input from keyboard
+   * Non-blocking: processes available keys until Enter or returns -1 if no Enter yet
+   */
+  private syscallGetline(buffer: number, maxlen: number): number {
+    // Collect all available keys looking for Enter
+    const chars: number[] = [];
+    let foundEnter = false;
+
+    // Process all available keys
+    while (this.keyboard.hasKey()) {
+      const ch = this.keyboard.readRegister(0x04); // Read and consume key
+
+      if (ch === 0x0D || ch === 0x0A) {
+        // Enter pressed - line is complete
+        foundEnter = true;
+        this.syscallPutchar(ch); // Echo newline
+        break;
+      } else if (ch === 0x08) {
+        // Backspace - remove last character
+        if (chars.length > 0) {
+          chars.pop();
+          this.syscallPutchar(ch); // Echo backspace
+        }
+      } else if (ch >= 0x20 && ch < 0x7F) {
+        // Printable character - only add if under maxlen
+        if (chars.length < maxlen) {
+          chars.push(ch);
+          this.syscallPutchar(ch); // Echo character
+        }
+        // If at maxlen, just consume and ignore the character
+      }
+    }
+
+    if (!foundEnter) {
+      // No Enter yet - return -1 to indicate line not complete
+      // The caller should retry
+      return 0xFFFFFFFF; // -1
+    }
+
+    // Write characters to buffer
+    for (let i = 0; i < chars.length; i++) {
+      this.writeByte(buffer + i, chars[i]);
+    }
+    // Null terminate
+    this.writeByte(buffer + chars.length, 0);
+
+    return chars.length;
   }
 }
