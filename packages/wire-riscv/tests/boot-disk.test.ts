@@ -408,7 +408,7 @@ describe('InteractiveSystem', () => {
       expect(output).toMatch(/\d+ bytes/);
     });
 
-    it.skip('should run native asm command', () => {
+    it('should run native asm command', () => {
       typeString(system, 'run ASM.BIN\r');
       system.tick(5000);
 
@@ -417,7 +417,7 @@ describe('InteractiveSystem', () => {
       expect(output).toContain('Assembled');
     });
 
-    it.skip('should create output file with native asm', () => {
+    it('should create output file with native asm', () => {
       const fs = system.getFilesystem();
       expect(fs).not.toBeNull();
 
@@ -429,7 +429,7 @@ describe('InteractiveSystem', () => {
       expect(fs!.fileExists('HELLO', 'BIN')).toBe(true);
     });
 
-    it.skip('should assemble valid code with native asm', () => {
+    it('should assemble valid code with native asm', () => {
       const fs = system.getFilesystem();
       expect(fs).not.toBeNull();
 
@@ -443,7 +443,7 @@ describe('InteractiveSystem', () => {
       expect(binData!.length).toBeGreaterThan(24); // At least header size
     });
 
-    it.skip('should create runnable executable with native asm', () => {
+    it('should create runnable executable with native asm', () => {
       const fs = system.getFilesystem();
       expect(fs).not.toBeNull();
 
@@ -463,7 +463,7 @@ describe('InteractiveSystem', () => {
       expect(output).toContain('Hi');
     });
 
-    it.skip('should show code size with native asm', () => {
+    it('should show code size with native asm', () => {
       typeString(system, 'run ASM.BIN\r');
       system.tick(5000);
 

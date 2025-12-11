@@ -294,16 +294,15 @@ done:   ; Exit
     this.fs.createFile('LS', 'BIN');
     this.fs.writeFile('LS', 'BIN', lsExe);
 
-    // ASM command - assembles source files
-    // Hardcoded to assemble HELLO.ASM to HELLO.BIN
-    // Code is 89 instructions (356 bytes = 0x164), so data at 0x1000 + 0x164 = 0x1164
+    // ASM command - native assembler
+    // Code is 88 instructions (352 bytes = 0x160), so data is at 0x1000 + 0x160 = 0x1160
     const asmCode = asm.assemble(`
 ; ASM - native assembler command
 ; Assembles HELLO.ASM to HELLO.BIN
 
         ; Open source file (HELLO.ASM)
         LUI a0, 0x1
-        ADDI a0, a0, 0x164  ; filename in data
+        ADDI a0, a0, 0x160  ; filename in data
         ADDI a1, zero, 0    ; mode = read
         ADDI a7, zero, 7    ; FOPEN
         ECALL
@@ -347,7 +346,7 @@ done:   ; Exit
 
         ; Open output file (HELLO.BIN)
         LUI a0, 0x1
-        ADDI a0, a0, 0x16F  ; output filename in data
+        ADDI a0, a0, 0x16A  ; output filename in data
         ADDI a1, zero, 1    ; mode = write
         ADDI a7, zero, 7    ; FOPEN
         ECALL
@@ -360,15 +359,14 @@ done:   ; Exit
         ; Wrap assembled code in RISV executable format
         ; Write 24-byte header + assembled code
 
-        ; Write RISV magic (0x56524952)
+        ; Write RISV magic (0x56534952)
         LUI a1, 0x5        ; temp buffer at 0x5000
-        LUI t0, 0x56524
-        ADDI t0, t0, 0x952  ; 0x56524952
+        LUI t0, 0x56535    ; Load 0x56535000
+        ADDI t0, t0, 0x952 ; Add signed -1710 -> 0x56534952
         SW t0, 0(a1)
 
-        ; Write entry point (0x1000)
-        LUI t0, 0x1
-        SW t0, 4(a1)
+        ; Write entry point offset (0 = start of code)
+        SW zero, 4(a1)
 
         ; Write code size
         SW s2, 8(a1)
@@ -404,7 +402,7 @@ done:   ; Exit
 
         ; Print success message
         LUI a0, 0x1
-        ADDI a0, a0, 0x17A  ; success msg
+        ADDI a0, a0, 0x174  ; success msg (offset 0x174)
         ADDI a7, zero, 3    ; PUTS
         ECALL
 
@@ -414,7 +412,7 @@ done:   ; Exit
         ECALL
 
         LUI a0, 0x1
-        ADDI a0, a0, 0x185  ; bytes suffix
+        ADDI a0, a0, 0x17F  ; bytes suffix (offset 0x17F)
         ADDI a7, zero, 3
         ECALL
 
@@ -422,21 +420,21 @@ done:   ; Exit
 
 error_open:
         LUI a0, 0x1
-        ADDI a0, a0, 0x18D  ; File not found message
+        ADDI a0, a0, 0x187  ; File not found message (offset 0x187)
         ADDI a7, zero, 3
         ECALL
         JAL zero, done
 
 error_asm:
         LUI a0, 0x1
-        ADDI a0, a0, 0x19D  ; Assembly error message
+        ADDI a0, a0, 0x197  ; Assembly error message (offset 0x197)
         ADDI a7, zero, 3
         ECALL
         JAL zero, done
 
 error_write:
         LUI a0, 0x1
-        ADDI a0, a0, 0x1AD  ; Write error message
+        ADDI a0, a0, 0x1A7  ; Write error message (offset 0x1A7)
         ADDI a7, zero, 3
         ECALL
 
@@ -445,13 +443,13 @@ done:   ADDI a7, zero, 0    ; EXIT
 `);
 
     const asmData = new TextEncoder().encode(
-      'HELLO.ASM\0' +           // offset 0x164 (11 bytes)
-      'HELLO.BIN\0' +           // offset 0x16F (11 bytes)
-      'Assembled \0' +          // offset 0x17A (11 bytes)
-      ' bytes\n\0' +            // offset 0x185 (8 bytes)
-      'File not found\n\0' +    // offset 0x18D (16 bytes)
-      'Assembly error\n\0' +    // offset 0x19D (16 bytes)
-      'Write error\n\0'         // offset 0x1AD (13 bytes)
+      'HELLO.ASM\0' +           // offset 0x160 (10 bytes)
+      'HELLO.BIN\0' +           // offset 0x16A (10 bytes)
+      'Assembled \0' +          // offset 0x174 (11 bytes)
+      ' bytes\n\0' +            // offset 0x17F (8 bytes)
+      'File not found\n\0' +    // offset 0x187 (16 bytes)
+      'Assembly error\n\0' +    // offset 0x197 (16 bytes)
+      'Write error\n\0'         // offset 0x1A7 (13 bytes)
     );
 
     const asmExe = new ExecutableBuilder()

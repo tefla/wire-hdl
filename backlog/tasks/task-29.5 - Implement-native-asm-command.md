@@ -41,10 +41,12 @@ This achieves self-hosting by allowing native RISC-V programs to assemble other 
 - [x] Can assemble HELLO.ASM to HELLO.BIN via ASSEMBLE syscall
 - [x] Output binary is valid RISV executable format
 - [x] ASSEMBLE syscall working (assembles 36 bytes successfully)
-- [~] 5+ tests for native asm (tests written, skipped due to minor offset bug)
+- [x] 5+ tests for native asm (all 5 tests passing)
 
-## Known Issues
+## Implementation Notes
 
-- String data offsets off by 1 byte (displays "sembled" instead of "Assembled")
-- Tests temporarily skipped until offset issue resolved
-- Functionality proven working (assembles correct number of bytes)
+- ASSEMBLE syscall (syscall 13) exposes TypeScript NativeAssembler to native code
+- ASM.BIN is 88 instructions (352 bytes)
+- Data section starts at 0x1160 when loaded at 0x1000
+- Creates valid RISV executable format with header + assembled code
+- Successfully assembles HELLO.ASM and produces runnable HELLO.BIN
