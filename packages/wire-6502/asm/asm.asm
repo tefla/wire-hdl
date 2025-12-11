@@ -49,8 +49,9 @@
 ; ------------------------------------------------------------------------------
 ; Constants
 ; ------------------------------------------------------------------------------
-SRC_BUF     = $2000       ; Source buffer start
-SRC_END     = $3FFF       ; Source buffer end
+SRC_BUF     = $2000       ; Source buffer start (1KB streaming buffer)
+SRC_MID     = $2200       ; Midpoint - refill trigger (512 bytes in)
+SRC_SIZE    = $0400       ; Buffer size (1KB = 2 sectors)
 OUT_BUF     = $4000       ; Output buffer start
 OUT_END     = $5FFF       ; Output buffer end
 SYM_TAB     = $6000       ; Symbol table start
@@ -101,6 +102,13 @@ FILESEC     = $5C          ; File start sector
 FILESIZE    = $5E          ; File size (16-bit)
 DIRSEC      = $64          ; Current directory sector being searched
 FNAMEOFF    = $66          ; Filename offset in CMD_BUF (preserved for SAVE_FILE)
+LABELREF    = $67          ; Flag: operand contains label reference (for forward refs)
+
+; Streaming I/O variables (for large file support)
+FILE_START  = $68          ; First data sector of source file (16-bit)
+STREAM_SEC  = $6A          ; Next sector to read (16-bit)
+STREAM_LEFT = $6C          ; Bytes remaining in file (16-bit)
+STREAM_END  = $6E          ; End of valid data in buffer (16-bit)
 
 ; Token types
 TOK_EOF     = 0
@@ -257,16 +265,19 @@ INIT_SYM:
 ; Main Assembly Loop
 ; ==============================================================================
 ASSEMBLE:
-        ; Reset source pointer for each pass
-        LDA #<SRC_BUF
-        STA SRCPTR
-        LDA #>SRC_BUF
-        STA SRCPTR+1
+        ; Initialize streaming for this pass (reloads file from start)
+        JSR STREAM_INIT
+        BCS ASM_STREAM_ERR  ; Stream init failed
 
         ; Reset PC (will be set by .ORG)
         LDA #0
         STA CURPC
         STA CURPC+1
+
+        ; Reset line number
+        LDA #0
+        STA LINENUM
+        STA LINENUM+1
 
         ; Reset output pointer for pass 2
         LDA PASS
@@ -276,11 +287,6 @@ ASSEMBLE:
         STA OUTPTR
         LDA #>OUT_BUF
         STA OUTPTR+1
-
-        ; Reset line number
-        LDA #0
-        STA LINENUM
-        STA LINENUM+1
 
 ASM_LOOP:
         JSR PARSE_LINE
@@ -292,6 +298,12 @@ ASM_LOOP:
         BNE ASM_DONE
 
         JMP ASM_LOOP
+
+ASM_STREAM_ERR:
+        ; Stream initialization failed
+        LDA #1
+        STA ERRFLAG
+        ; Fall through to ASM_DONE
 
 ASM_DONE:
         RTS
@@ -402,6 +414,21 @@ PL_DONE:
         LDA #0
         ADC SRCPTR+1
         STA SRCPTR+1
+
+        ; Check if we've crossed the midpoint and need to refill buffer
+        ; Compare SRCPTR with SRC_MID ($2200)
+        LDA SRCPTR+1
+        CMP #>SRC_MID
+        BCC PL_NO_REFILL    ; SRCPTR+1 < $22, no refill needed
+        BNE PL_REFILL       ; SRCPTR+1 > $22, refill needed
+        LDA SRCPTR
+        CMP #<SRC_MID
+        BCC PL_NO_REFILL    ; SRCPTR < SRC_MID, no refill needed
+
+PL_REFILL:
+        JSR STREAM_REFILL
+
+PL_NO_REFILL:
         RTS
 
 ; ==============================================================================
@@ -596,9 +623,13 @@ PO_ABY:
 PO_NO_INDEX:
         ; Check if relative (for branches - handled by lookup)
         ; Determine if zero page or absolute
+        ; If operand contains a label reference, always use absolute mode
+        ; (forward refs return 0 but target is usually not in zero page)
+        LDA LABELREF
+        BNE PO_ABS          ; Label reference -> use absolute
         LDA OPERAND+1
-        BNE PO_ABS
-        ; Could be zero page
+        BNE PO_ABS          ; High byte non-zero -> absolute
+        ; Could be zero page (literal address only)
         LDA #AM_ZP
         STA ADDRMODE
         RTS
@@ -615,6 +646,7 @@ PARSE_EXPR:
         STA EXPRVAL
         STA EXPRVAL+1
         STA LOBYTE
+        STA LABELREF        ; Clear label reference flag
 
         ; Check for < or > prefix
         LDA (SRCPTR),Y
@@ -719,7 +751,9 @@ PARSE_VALUE:
         BCC PV_DEC
 
 PV_LABEL:
-        ; Parse label name
+        ; Parse label name - set flag for addressing mode detection
+        LDA #1
+        STA LABELREF        ; Mark that operand contains a label reference
         JSR GET_LABEL
         JSR LOOKUP_LABEL
         BCS PV_UNDEF
@@ -2167,67 +2201,15 @@ LF_PRINT_NAME:
 LF_PRINT_DONE:
         JSR NEWLINE
 
-        ; Load file into SRC_BUF
-        ; For simplicity, load one sector at a time
-        LDA #<SRC_BUF
-        STA SRCPTR
-        LDA #>SRC_BUF
-        STA SRCPTR+1
-
-        ; Calculate number of sectors needed
-        LDA FILESIZE+1
-        LSR A               ; Divide by 2 (512 = 2 pages)
-        STA CHARTMP         ; Sector count high approximation
-        LDA FILESIZE
-        BEQ LF_NO_EXTRA
-        INC CHARTMP         ; Round up if any low bytes
-LF_NO_EXTRA:
-        LDA CHARTMP
-        BEQ LF_ONE_SECTOR   ; At least one sector
-        JMP LF_LOAD_LOOP
-LF_ONE_SECTOR:
-        LDA #1
-        STA CHARTMP
-
-LF_LOAD_LOOP:
-        ; Read sector
+        ; Save file location for streaming (don't load entire file)
+        ; FILESEC already has start sector from directory lookup
         LDA FILESEC
-        STA $30
+        STA FILE_START
         LDA FILESEC+1
-        STA $31
-        LDA SRCPTR
-        STA $32
-        LDA SRCPTR+1
-        STA $33
-        JSR DISK_READ
-        BCS LF_READ_ERROR
+        STA FILE_START+1
 
-        ; Advance to next sector
-        INC FILESEC
-        BNE LF_NO_CARRY
-        INC FILESEC+1
-LF_NO_CARRY:
-
-        ; Advance buffer pointer by 512 bytes (2 pages)
-        CLC
-        LDA SRCPTR+1
-        ADC #2
-        STA SRCPTR+1
-
-        ; Decrement sector count
-        DEC CHARTMP
-        BNE LF_LOAD_LOOP
-
-        ; Null-terminate the source (in case file doesn't end with null)
-        LDY #0
-        LDA #0
-        STA (SRCPTR),Y
-
-        ; Reset source pointer to start
-        LDA #<SRC_BUF
-        STA SRCPTR
-        LDA #>SRC_BUF
-        STA SRCPTR+1
+        ; FILESIZE already set from directory entry
+        ; Streaming will be initialized by STREAM_INIT before each pass
 
         CLC                 ; Success
         RTS
@@ -2276,6 +2258,264 @@ LF_READ_ERROR:
         LDX #>MSG_READERR
         JSR PRINT_STR
         SEC                 ; Error
+        RTS
+
+; ==============================================================================
+; STREAM_INIT - Initialize streaming for a new pass
+; ==============================================================================
+; Loads first 1KB (2 sectors) of source file into buffer
+; Sets up streaming state for sequential reading
+; ==============================================================================
+STREAM_INIT:
+        ; Reset stream position to file start
+        LDA FILE_START
+        STA STREAM_SEC
+        LDA FILE_START+1
+        STA STREAM_SEC+1
+
+        ; Set bytes remaining to file size
+        LDA FILESIZE
+        STA STREAM_LEFT
+        LDA FILESIZE+1
+        STA STREAM_LEFT+1
+
+        ; Initialize source pointer to buffer start
+        LDA #<SRC_BUF
+        STA SRCPTR
+        LDA #>SRC_BUF
+        STA SRCPTR+1
+
+        ; Load first sector into buffer at SRC_BUF
+        LDA STREAM_SEC
+        STA $30
+        LDA STREAM_SEC+1
+        STA $31
+        LDA #<SRC_BUF
+        STA $32
+        LDA #>SRC_BUF
+        STA $33
+        JSR DISK_READ
+        BCS SI_READ_ERR_JMP1
+
+        ; Advance to next sector
+        INC STREAM_SEC
+        BNE SI_NO_CARRY1
+        INC STREAM_SEC+1
+SI_NO_CARRY1:
+        JMP SI_CONT1
+SI_READ_ERR_JMP1:
+        JMP SI_READ_ERR
+SI_CONT1:
+
+        ; Subtract 512 from bytes remaining (or set to 0 if < 512)
+        SEC
+        LDA STREAM_LEFT
+        SBC #<512
+        STA STREAM_LEFT
+        LDA STREAM_LEFT+1
+        SBC #>512
+        STA STREAM_LEFT+1
+        BCS SI_CHECK_SECOND ; No underflow, maybe load second sector
+        ; Underflow - file was < 512 bytes, clear remaining
+        LDA #0
+        STA STREAM_LEFT
+        STA STREAM_LEFT+1
+        JMP SI_SET_END
+
+SI_CHECK_SECOND:
+        ; Check if there's more data to load second sector
+        LDA STREAM_LEFT
+        ORA STREAM_LEFT+1
+        BEQ SI_SET_END      ; No more data
+
+        ; Load second sector into buffer at SRC_MID ($2200)
+        LDA STREAM_SEC
+        STA $30
+        LDA STREAM_SEC+1
+        STA $31
+        LDA #<SRC_MID
+        STA $32
+        LDA #>SRC_MID
+        STA $33
+        JSR DISK_READ
+        BCS SI_READ_ERR_JMP2
+
+        ; Advance to next sector
+        INC STREAM_SEC
+        BNE SI_NO_CARRY2
+        INC STREAM_SEC+1
+SI_NO_CARRY2:
+        JMP SI_CONT2
+SI_READ_ERR_JMP2:
+        JMP SI_READ_ERR
+SI_CONT2:
+
+        ; Subtract 512 from bytes remaining
+        SEC
+        LDA STREAM_LEFT
+        SBC #<512
+        STA STREAM_LEFT
+        LDA STREAM_LEFT+1
+        SBC #>512
+        STA STREAM_LEFT+1
+        BCS SI_SET_END
+        ; Underflow - clear remaining
+        LDA #0
+        STA STREAM_LEFT
+        STA STREAM_LEFT+1
+
+SI_SET_END:
+        ; Set STREAM_END to mark end of valid data in buffer
+        ; STREAM_END = SRC_BUF + min(FILESIZE, 1024)
+        ; For simplicity, just set to buffer end if we loaded both sectors
+        LDA FILESIZE+1
+        CMP #>SRC_SIZE      ; Compare high bytes (FILESIZE >= 1024?)
+        BCS SI_FULL_BUF     ; File >= 1024, buffer is full
+        BNE SI_PARTIAL      ; File < 256, use file size
+        LDA FILESIZE
+        CMP #<SRC_SIZE
+        BCS SI_FULL_BUF     ; File >= 1024
+
+SI_PARTIAL:
+        ; Buffer holds entire file (< 1KB)
+        CLC
+        LDA #<SRC_BUF
+        ADC FILESIZE
+        STA STREAM_END
+        LDA #>SRC_BUF
+        ADC FILESIZE+1
+        STA STREAM_END+1
+        JMP SI_NULL_TERM
+
+SI_FULL_BUF:
+        ; Buffer is full (1KB) - SRC_BUF + SRC_SIZE = $2000 + $0400 = $2400
+        LDA #$00            ; Low byte of $2400
+        STA STREAM_END
+        LDA #$24            ; High byte of $2400
+        STA STREAM_END+1
+
+SI_NULL_TERM:
+        ; Null-terminate at STREAM_END (safety for small files)
+        LDY #0
+        LDA #0
+        STA (STREAM_END),Y
+
+        CLC                 ; Success
+        RTS
+
+SI_READ_ERR:
+        SEC                 ; Error
+        RTS
+
+; ==============================================================================
+; STREAM_REFILL - Refill buffer when parser crosses midpoint
+; ==============================================================================
+; Called from PL_DONE when SRCPTR >= SRC_MID
+; Shifts second half of buffer to first half, loads new sector
+; ==============================================================================
+STREAM_REFILL:
+        ; Save Y register
+        TYA
+        PHA
+
+        ; Copy bytes from SRC_MID to SRC_BUF (shift second half to first)
+        ; Copy 512 bytes
+        LDY #0
+SR_COPY_LOOP:
+        LDA SRC_MID,Y
+        STA SRC_BUF,Y
+        INY
+        BNE SR_COPY_LOOP
+        ; Second page
+        LDY #0
+SR_COPY_LOOP2:
+        LDA SRC_MID+256,Y
+        STA SRC_BUF+256,Y
+        INY
+        BNE SR_COPY_LOOP2
+
+        ; Adjust SRCPTR by -512 (it was past midpoint)
+        SEC
+        LDA SRCPTR
+        SBC #<512
+        STA SRCPTR
+        LDA SRCPTR+1
+        SBC #>512
+        STA SRCPTR+1
+
+        ; Also adjust STREAM_END by -512
+        SEC
+        LDA STREAM_END
+        SBC #<512
+        STA STREAM_END
+        LDA STREAM_END+1
+        SBC #>512
+        STA STREAM_END+1
+
+        ; Check if there's more data to load
+        LDA STREAM_LEFT
+        ORA STREAM_LEFT+1
+        BEQ SR_NO_MORE      ; No more data to load
+
+        ; Load next sector into SRC_MID
+        LDA STREAM_SEC
+        STA $30
+        LDA STREAM_SEC+1
+        STA $31
+        LDA #<SRC_MID
+        STA $32
+        LDA #>SRC_MID
+        STA $33
+        JSR DISK_READ
+        BCS SR_READ_ERR
+
+        ; Advance sector pointer
+        INC STREAM_SEC
+        BNE SR_NO_CARRY
+        INC STREAM_SEC+1
+SR_NO_CARRY:
+
+        ; Adjust STREAM_END by +512 (new data loaded)
+        CLC
+        LDA STREAM_END
+        ADC #<512
+        STA STREAM_END
+        LDA STREAM_END+1
+        ADC #>512
+        STA STREAM_END+1
+
+        ; Subtract 512 from bytes remaining
+        SEC
+        LDA STREAM_LEFT
+        SBC #<512
+        STA STREAM_LEFT
+        LDA STREAM_LEFT+1
+        SBC #>512
+        STA STREAM_LEFT+1
+        BCS SR_DONE
+        ; Underflow - clear remaining
+        LDA #0
+        STA STREAM_LEFT
+        STA STREAM_LEFT+1
+        JMP SR_DONE
+
+SR_NO_MORE:
+        ; No more data - null terminate at current end
+        LDY #0
+        LDA #0
+        STA (STREAM_END),Y
+
+SR_DONE:
+        ; Restore Y register
+        PLA
+        TAY
+        CLC
+        RTS
+
+SR_READ_ERR:
+        PLA
+        TAY
+        SEC
         RTS
 
 ; ==============================================================================

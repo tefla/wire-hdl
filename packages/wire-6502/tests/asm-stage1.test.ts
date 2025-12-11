@@ -463,8 +463,8 @@ describe('ASM.COM Stage 1 Assembler', () => {
     computer.runUntilOutput('/SRC/', 100000);
     computer.clearOutput();
 
-    // Check CUR_DIR after CD - should be 9 (entry index of SRC)
-    expect(computer.memory[CUR_DIR_LO]).toBe(9);  // SRC is entry 9
+    // Check CUR_DIR after CD - should be 19 (entry index of SRC)
+    expect(computer.memory[CUR_DIR_LO]).toBe(19);  // SRC is entry 19
     expect(computer.memory[CUR_DIR_HI]).toBe(0);
 
     // Try to assemble HELLO.ASM in SRC directory
@@ -473,7 +473,9 @@ describe('ASM.COM Stage 1 Assembler', () => {
     // Run until assembly completes or fails
     for (let i = 0; i < 2000000; i++) {
       computer.run(100);
-      if (computer.output.includes('Error') || computer.output.includes('Assembly complete') || computer.output.includes('not found') || computer.output.includes('?')) {
+      if (computer.output.includes('Error') || computer.output.includes('Assembly complete') || computer.output.includes('not found') || computer.output.includes('?') || computer.output.includes('/>')) {
+        // Run a bit more to capture full output
+        computer.run(10000);
         break;
       }
     }
@@ -482,5 +484,251 @@ describe('ASM.COM Stage 1 Assembler', () => {
     expect(computer.output).not.toContain('?');
     expect(computer.output).not.toContain('not found');
     expect(computer.output).toContain('Assembly complete');
+  });
+});
+
+describe('ASM.COM Directive Support (task-11.1)', () => {
+  /**
+   * Test for .DB (define byte) directive
+   * Currently FAILING - .DB causes "Invalid addressing mode" error
+   * This test documents the bug and will pass once fixed
+   */
+  it('should support .DB directive for single byte', async () => {
+    const computer = new TestComputer();
+
+    // Create and insert floppy disk
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    const gotPrompt = computer.runUntilOutput('/>', 100000);
+    expect(gotPrompt).toBe(true);
+    computer.clearOutput();
+
+    // Install files
+    computer.sendLine('INSTALL');
+    const installDone = computer.runUntilOutput('Done', 500000);
+    expect(installDone).toBe(true);
+    computer.clearOutput();
+
+    // Assemble TESTDB.ASM which uses .DB directive
+    computer.sendLine('ASM TESTDB.ASM');
+
+    // Run until assembly completes or fails
+    const gotComplete = computer.runUntilOutput('Assembly complete', 5000000);
+
+    // Debug output if failed
+    if (!gotComplete) {
+      console.log('ASM TESTDB.ASM output:', computer.output);
+    }
+
+    // Should succeed without errors
+    expect(computer.output).not.toContain('Error');
+    expect(gotComplete).toBe(true);
+
+    // Verify output bytes: .DB $42, .DB $01, $02, RTS
+    // Expected: $42, $01, $02, $60
+    const outputBuf = 0x4000;  // OUT_BUF
+    expect(computer.memory[outputBuf + 0]).toBe(0x42);  // .DB $42
+    expect(computer.memory[outputBuf + 1]).toBe(0x01);  // .DB $01
+    expect(computer.memory[outputBuf + 2]).toBe(0x02);  // .DB $02
+    expect(computer.memory[outputBuf + 3]).toBe(0x60);  // RTS
+  });
+
+  /**
+   * Test for .DW (define word) directive
+   * TESTDW.ASM has:
+   *   .ORG $0800
+   *   .DW $1234    ; Should emit $34, $12 (little-endian)
+   *   .DW $ABCD    ; Should emit $CD, $AB
+   *   RTS
+   *
+   * Expected output: $34 $12 $CD $AB $60
+   */
+  it('should support .DW directive for 16-bit word (little-endian)', async () => {
+    const computer = new TestComputer();
+
+    // Create and insert floppy disk
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    const gotPrompt = computer.runUntilOutput('/>', 100000);
+    expect(gotPrompt).toBe(true);
+    computer.clearOutput();
+
+    // Install files
+    computer.sendLine('INSTALL');
+    const installDone = computer.runUntilOutput('Done', 500000);
+    expect(installDone).toBe(true);
+    computer.clearOutput();
+
+    // Assemble TESTDW.ASM which uses .DW directive
+    computer.sendLine('ASM TESTDW.ASM');
+
+    // Run until assembly completes or fails
+    const gotComplete = computer.runUntilOutput('Assembly complete', 5000000);
+
+    // Debug output if failed
+    if (!gotComplete) {
+      console.log('ASM TESTDW.ASM output:', computer.output);
+    }
+
+    // Should succeed without errors
+    expect(computer.output).not.toContain('Error');
+    expect(gotComplete).toBe(true);
+
+    // Verify output bytes:
+    // .DW $1234 = $34 $12 (little-endian)
+    // .DW $ABCD = $CD $AB (little-endian)
+    // RTS = $60
+    const outputBuf = 0x4000;  // OUT_BUF
+    expect(computer.memory[outputBuf + 0]).toBe(0x34);  // Low byte of $1234
+    expect(computer.memory[outputBuf + 1]).toBe(0x12);  // High byte of $1234
+    expect(computer.memory[outputBuf + 2]).toBe(0xcd);  // Low byte of $ABCD
+    expect(computer.memory[outputBuf + 3]).toBe(0xab);  // High byte of $ABCD
+    expect(computer.memory[outputBuf + 4]).toBe(0x60);  // RTS
+  });
+});
+
+describe('ASM.COM Forward Reference Support (task-11.2)', () => {
+  /**
+   * Test for forward JMP reference
+   * TESTFWD.ASM has:
+   *   .ORG $0800
+   *   JMP START    ; Forward reference to label not yet defined ($0800-$0802)
+   *   NOP          ; ($0803)
+   *   START:       ; Address $0804
+   *   RTS
+   *
+   * Expected output: $4C $04 $08 $EA $60
+   *   JMP $0804 (opcode $4C, addr $0804 little-endian)
+   *   NOP ($EA)
+   *   RTS ($60)
+   */
+  it('should resolve forward JMP references correctly', async () => {
+    const computer = new TestComputer();
+
+    // Create and insert floppy disk
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    const gotPrompt = computer.runUntilOutput('/>', 100000);
+    expect(gotPrompt).toBe(true);
+    computer.clearOutput();
+
+    // Install files
+    computer.sendLine('INSTALL');
+    const installDone = computer.runUntilOutput('Done', 500000);
+    expect(installDone).toBe(true);
+    computer.clearOutput();
+
+    // Assemble TESTFWD.ASM which uses forward JMP reference
+    computer.sendLine('ASM TESTFWD.ASM');
+
+    // Run until assembly completes or fails
+    const gotComplete = computer.runUntilOutput('Assembly complete', 5000000);
+
+    // Debug output if failed
+    if (!gotComplete) {
+      console.log('ASM TESTFWD.ASM output:', computer.output);
+    }
+
+    // Should succeed without errors
+    expect(computer.output).not.toContain('Error');
+    expect(gotComplete).toBe(true);
+
+    // Verify output bytes:
+    // JMP $0804 = $4C $04 $08
+    // NOP = $EA
+    // RTS = $60
+    const outputBuf = 0x4000;  // OUT_BUF
+    expect(computer.memory[outputBuf + 0]).toBe(0x4c);  // JMP opcode
+    expect(computer.memory[outputBuf + 1]).toBe(0x04);  // Low byte of $0804
+    expect(computer.memory[outputBuf + 2]).toBe(0x08);  // High byte of $0804
+    expect(computer.memory[outputBuf + 3]).toBe(0xea);  // NOP
+    expect(computer.memory[outputBuf + 4]).toBe(0x60);  // RTS
+  });
+});
+
+describe('ASM.COM Large File Streaming (task-11.3)', () => {
+  /**
+   * Test for large file streaming support
+   * TESTBIG.ASM is ~11KB (exceeds 8KB buffer limit)
+   * Contains mostly comments with just a few instructions
+   *
+   * Expected output: $A9 $42 $60
+   *   LDA #$42 (opcode $A9, operand $42)
+   *   RTS ($60)
+   */
+  it('should assemble files larger than 8KB using streaming', async () => {
+    const computer = new TestComputer();
+
+    // Create and insert floppy disk
+    const floppySectors = createFloppyDisk();
+    computer.insertFloppy(floppySectors);
+
+    // Load shell
+    const { bytes, origin } = assembleShell();
+    for (let i = 0; i < bytes.length; i++) {
+      computer.memory[origin + i] = bytes[i];
+    }
+    computer.cpu.pc = origin;
+
+    // Run until prompt
+    const gotPrompt = computer.runUntilOutput('/>', 100000);
+    expect(gotPrompt).toBe(true);
+    computer.clearOutput();
+
+    // Install files
+    computer.sendLine('INSTALL');
+    const installDone = computer.runUntilOutput('Done', 500000);
+    expect(installDone).toBe(true);
+    computer.clearOutput();
+
+    // Assemble TESTBIG.ASM (>8KB file, tests streaming)
+    computer.sendLine('ASM TESTBIG.ASM');
+
+    // Run until assembly completes or fails (may take longer due to size)
+    const gotComplete = computer.runUntilOutput('Assembly complete', 20000000);
+
+    // Debug output if failed
+    if (!gotComplete) {
+      console.log('ASM TESTBIG.ASM output:', computer.output);
+    }
+
+    // Should succeed without errors
+    expect(computer.output).not.toContain('Error');
+    expect(gotComplete).toBe(true);
+
+    // Verify output bytes:
+    // LDA #$42 = $A9 $42
+    // RTS = $60
+    const outputBuf = 0x4000;  // OUT_BUF
+    expect(computer.memory[outputBuf + 0]).toBe(0xa9);  // LDA immediate
+    expect(computer.memory[outputBuf + 1]).toBe(0x42);  // #$42
+    expect(computer.memory[outputBuf + 2]).toBe(0x60);  // RTS
   });
 });

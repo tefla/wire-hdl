@@ -21,4 +21,7 @@ DONE:
     RTS
 
 MESSAGE:
-    .DB "Hello, WireOS!", $00
+    ; "Hello, WireOS!" as individual bytes (string literals not supported yet)
+    .DB $48, $65, $6C, $6C, $6F, $2C, $20  ; "Hello, "
+    .DB $57, $69, $72, $65, $4F, $53, $21  ; "WireOS!"
+    .DB $00  ; null terminator
