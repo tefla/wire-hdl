@@ -14,7 +14,7 @@ import { NativeAssembler } from './native-assembler.js';
 import { ExecutableBuilder, ProgramLoader, EXECUTABLE_MAGIC, HEADER_SIZE } from './program-loader.js';
 import { Bootloader, BOOT_CONFIG } from './bootloader.js';
 import { TEXT_COLS, TEXT_ROWS } from './graphics.js';
-import editAsmSource from '../../asm/EDIT-SIMPLE.ASM?raw';
+import editAsmSource from '../../asm/EDIT-INTERACTIVE.ASM?raw';
 
 /** Boot disk configuration */
 export const BOOT_DISK_CONFIG = {
@@ -461,9 +461,8 @@ done:   ADDI a7, zero, 0    ; EXIT
     this.fs.createFile('ASM', 'BIN');
     this.fs.writeFile('ASM', 'BIN', asmExe);
 
-    // EDIT command - Full-screen MS-DOS-style text editor
-    // Uses full EDIT.ASM source with .text and .data sections
-    // Assembler now correctly handles section ordering
+    // EDIT command - Interactive text editor with keyboard input
+    // Phase 1: Character input, backspace, enter key (task-31.5)
     const editCode = asm.assemble(editAsmSource);
 
     const editExe = new ExecutableBuilder()
