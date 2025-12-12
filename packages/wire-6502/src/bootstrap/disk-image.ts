@@ -257,14 +257,15 @@ export function createFloppyDisk(): Uint8Array[] {
   const DATA_START = WIREFS.DATA_START;    // 20
 
   // Index 16 will be SRC directory (after the first 16 files 0-15)
-  const SRC_DIR_INDEX = 21;  // Updated after adding TESTFWDL.ASM
+  const SRC_DIR_INDEX = 22;  // Updated after adding TESTFWDL.ASM and AS.COM
   const files: FileEntry[] = [
     // Root files (indices 0-15)
     // SHELL.COM must be first so boot loader can find it easily
     { name: 'SHELL', ext: 'COM', data: shellResult.bytes },       // 0
     { name: 'ASM', ext: 'COM', data: asmResult.bytes },           // 1 - Stage 1 assembler
-    { name: 'ASM0', ext: 'COM', data: asm0Result.bytes },         // 2 - Placeholder
-    { name: 'ASM2', ext: 'COM', data: asm2Result.bytes },         // 3 - Stage 2 assembler
+    { name: 'AS', ext: 'COM', data: asmResult.bytes },            // 2 - Stage 1 assembler (alias for self-hosting)
+    { name: 'ASM0', ext: 'COM', data: asm0Result.bytes },         // 3 - Placeholder
+    { name: 'ASM2', ext: 'COM', data: asm2Result.bytes },         // 4 - Stage 2 assembler
     { name: 'EDIT', ext: 'COM', data: editResult.bytes },         // 4
     { name: 'CD', ext: 'COM', data: cdResult.bytes },             // 5
     { name: 'MKDIR', ext: 'COM', data: mkdirResult.bytes },       // 6
@@ -283,7 +284,7 @@ export function createFloppyDisk(): Uint8Array[] {
     { name: 'TESTBIG', ext: 'ASM', data: textToBytes(TESTBIG_ASM) }, // 18
     { name: 'TESTSTR', ext: 'ASM', data: textToBytes(TESTSTR_ASM) }, // 19
     { name: 'TESTFWDL', ext: 'ASM', data: textToBytes(TESTFWDLO_ASM) }, // 20 - forward ref with < >
-    // SRC directory (index 21)
+    // SRC directory (index 22)
     { name: 'SRC', ext: '', data: new Uint8Array(0), isDirectory: true },
     // Files in SRC/ (indices 15+)
     // ASM.ASM included for self-hosting demo (75KB)
