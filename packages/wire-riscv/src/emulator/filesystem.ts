@@ -105,19 +105,58 @@ export class WireFS {
   }
 
   /**
-   * Create a new file
+   * Parse a filename into name and extension
    */
-  createFile(name: string, extension: string): boolean {
+  private parseFilename(filename: string): { name: string; ext: string } {
+    const upper = filename.toUpperCase();
+    const dotPos = upper.lastIndexOf('.');
+
+    let name: string;
+    let ext: string;
+
+    if (dotPos >= 0) {
+      name = upper.substring(0, dotPos);
+      ext = upper.substring(dotPos + 1);
+    } else {
+      name = upper;
+      ext = '';
+    }
+
+    // Truncate to max lengths
+    name = name.substring(0, 8);
+    ext = ext.substring(0, 3);
+
+    return { name, ext };
+  }
+
+  /**
+   * Create a new file (convenience method accepting full filename)
+   */
+  createFile(filename: string): boolean;
+  createFile(name: string, extension: string): boolean;
+  createFile(nameOrFilename: string, extension?: string): boolean {
+    let name: string;
+    let ext: string;
+
+    if (extension === undefined) {
+      const parsed = this.parseFilename(nameOrFilename);
+      name = parsed.name;
+      ext = parsed.ext;
+    } else {
+      name = nameOrFilename;
+      ext = extension;
+    }
+
     // Validate and normalize name
     name = this.normalizeName(name, 8);
-    extension = this.normalizeName(extension, 3);
+    ext = this.normalizeName(ext, 3);
 
-    if (!name || !this.isValidName(name) || !this.isValidName(extension)) {
+    if (!name || !this.isValidName(name) || !this.isValidName(ext)) {
       return false;
     }
 
     // Check if file already exists
-    if (this.fileExists(name, extension)) {
+    if (this.fileExists(name, ext)) {
       return false;
     }
 
@@ -130,7 +169,7 @@ export class WireFS {
     // Write directory entry
     const entry: FileEntry = {
       name,
-      extension,
+      extension: ext,
       attributes: FileAttributes.NONE,
       size: 0,
       firstSector: 0,
@@ -141,13 +180,30 @@ export class WireFS {
   }
 
   /**
-   * Write data to a file
+   * Write data to a file (convenience method accepting full filename)
    */
-  writeFile(name: string, extension: string, data: Uint8Array): boolean {
-    name = this.normalizeName(name, 8);
-    extension = this.normalizeName(extension, 3);
+  writeFile(filename: string, data: Uint8Array): boolean;
+  writeFile(name: string, extension: string, data: Uint8Array): boolean;
+  writeFile(nameOrFilename: string, extensionOrData: string | Uint8Array, data?: Uint8Array): boolean {
+    let name: string;
+    let ext: string;
+    let fileData: Uint8Array;
 
-    const entryIndex = this.findDirectoryEntry(name, extension);
+    if (extensionOrData instanceof Uint8Array) {
+      const parsed = this.parseFilename(nameOrFilename);
+      name = parsed.name;
+      ext = parsed.ext;
+      fileData = extensionOrData;
+    } else {
+      name = nameOrFilename;
+      ext = extensionOrData;
+      fileData = data!;
+    }
+
+    name = this.normalizeName(name, 8);
+    ext = this.normalizeName(ext, 3);
+
+    const entryIndex = this.findDirectoryEntry(name, ext);
     if (entryIndex < 0) {
       return false;
     }
@@ -163,7 +219,7 @@ export class WireFS {
     }
 
     // Allocate new sectors and write data
-    const sectorsNeeded = Math.ceil(data.length / SECTOR_SIZE);
+    const sectorsNeeded = Math.ceil(fileData.length / SECTOR_SIZE);
     if (sectorsNeeded === 0) {
       entry.size = 0;
       entry.firstSector = 0;
@@ -180,11 +236,11 @@ export class WireFS {
     // Write data to sectors
     let sector = firstSector;
     let offset = 0;
-    while (sector !== FAT_EOF && offset < data.length) {
+    while (sector !== FAT_EOF && offset < fileData.length) {
       const sectorOffset = sector * SECTOR_SIZE;
-      const bytesToWrite = Math.min(SECTOR_SIZE, data.length - offset);
+      const bytesToWrite = Math.min(SECTOR_SIZE, fileData.length - offset);
       for (let i = 0; i < bytesToWrite; i++) {
-        this.storage[sectorOffset + i] = data[offset + i];
+        this.storage[sectorOffset + i] = fileData[offset + i];
       }
       // Clear rest of sector
       for (let i = bytesToWrite; i < SECTOR_SIZE; i++) {
@@ -195,7 +251,7 @@ export class WireFS {
     }
 
     // Update directory entry
-    entry.size = data.length;
+    entry.size = fileData.length;
     entry.firstSector = firstSector;
     this.writeDirectoryEntry(entryIndex, entry);
 
@@ -203,13 +259,27 @@ export class WireFS {
   }
 
   /**
-   * Read file contents
+   * Read file contents (convenience method accepting full filename)
    */
-  readFile(name: string, extension: string): Uint8Array | null {
-    name = this.normalizeName(name, 8);
-    extension = this.normalizeName(extension, 3);
+  readFile(filename: string): Uint8Array | null;
+  readFile(name: string, extension: string): Uint8Array | null;
+  readFile(nameOrFilename: string, extension?: string): Uint8Array | null {
+    let name: string;
+    let ext: string;
 
-    const entry = this.getFileEntry(name, extension);
+    if (extension === undefined) {
+      const parsed = this.parseFilename(nameOrFilename);
+      name = parsed.name;
+      ext = parsed.ext;
+    } else {
+      name = nameOrFilename;
+      ext = extension;
+    }
+
+    name = this.normalizeName(name, 8);
+    ext = this.normalizeName(ext, 3);
+
+    const entry = this.getFileEntry(name, ext);
     if (!entry || entry.size === 0) {
       return entry ? new Uint8Array(0) : null;
     }
@@ -232,13 +302,27 @@ export class WireFS {
   }
 
   /**
-   * Delete a file
+   * Delete a file (convenience method accepting full filename)
    */
-  deleteFile(name: string, extension: string): boolean {
-    name = this.normalizeName(name, 8);
-    extension = this.normalizeName(extension, 3);
+  deleteFile(filename: string): boolean;
+  deleteFile(name: string, extension: string): boolean;
+  deleteFile(nameOrFilename: string, extension?: string): boolean {
+    let name: string;
+    let ext: string;
 
-    const entryIndex = this.findDirectoryEntry(name, extension);
+    if (extension === undefined) {
+      const parsed = this.parseFilename(nameOrFilename);
+      name = parsed.name;
+      ext = parsed.ext;
+    } else {
+      name = nameOrFilename;
+      ext = extension;
+    }
+
+    name = this.normalizeName(name, 8);
+    ext = this.normalizeName(ext, 3);
+
+    const entryIndex = this.findDirectoryEntry(name, ext);
     if (entryIndex < 0) {
       return false;
     }
@@ -294,12 +378,26 @@ export class WireFS {
   }
 
   /**
-   * Check if file exists
+   * Check if file exists (convenience method accepting full filename)
    */
-  fileExists(name: string, extension: string): boolean {
+  fileExists(filename: string): boolean;
+  fileExists(name: string, extension: string): boolean;
+  fileExists(nameOrFilename: string, extension?: string): boolean {
+    let name: string;
+    let ext: string;
+
+    if (extension === undefined) {
+      const parsed = this.parseFilename(nameOrFilename);
+      name = parsed.name;
+      ext = parsed.ext;
+    } else {
+      name = nameOrFilename;
+      ext = extension;
+    }
+
     name = this.normalizeName(name, 8);
-    extension = this.normalizeName(extension, 3);
-    return this.findDirectoryEntry(name, extension) >= 0;
+    ext = this.normalizeName(ext, 3);
+    return this.findDirectoryEntry(name, ext) >= 0;
   }
 
   /**
@@ -503,7 +601,7 @@ export class WireFS {
   }
 
   private isValidName(name: string): boolean {
-    // Allow alphanumeric and some special chars
-    return /^[A-Z0-9_\-]+$/.test(name);
+    // Allow alphanumeric and some special chars, or empty string (for extension)
+    return /^[A-Z0-9_\-]*$/.test(name);
   }
 }

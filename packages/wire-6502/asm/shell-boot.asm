@@ -1648,10 +1648,13 @@ INST_DWAIT:
     BNE INST_CHK
     INC $39
 INST_CHK:
-    ; Stop at sector 255 (copy entire floppy - 255 is max for 8-bit counter)
+    ; Stop at sector 512 (copy entire floppy including large files)
+    ; After copying sector 511 (0x01FF), increment makes $38=0, $39=2
+    LDA $39
+    CMP #$02            ; High byte = 2 means we've done 512 sectors
+    BNE INST_LOOP       ; Continue if high != 2
     LDA $38
-    CMP #$FF            ; 255 sectors
-    BNE INST_LOOP
+    BNE INST_LOOP       ; Continue if low != 0 (not exactly 512)
 
     ; Done! Print newline and "Done"
     JSR $F080

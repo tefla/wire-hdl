@@ -157,11 +157,6 @@ class TestComputer {
       if (diskCmd === 1) {
         for (let i = 0; i < count; i++) {
           const sectorData = this.hdd.get(sector + i) || new Uint8Array(512);
-          // Debug high sector reads
-          if (sector >= 300 && this.debugReads) {
-            this.sectorReadCount++;
-            console.log(`HDD READ: sector=${sector + i} -> buf=$${bufAddr.toString(16)}, first bytes: ${Array.from(sectorData.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-          }
           for (let j = 0; j < 512; j++) {
             this.memory[bufAddr + i * 512 + j] = sectorData[j];
           }
@@ -178,13 +173,6 @@ class TestComputer {
 
       this.memory[IO.DISK_CMD] = 0;
     }
-  }
-
-  debugReads = false;
-  sectorReadCount = 0;
-  enableDebugReads(): void {
-    this.debugReads = true;
-    this.sectorReadCount = 0;
   }
 
   run(instructions: number): void {
@@ -475,8 +463,8 @@ describe('ASM.COM Stage 1 Assembler', () => {
     computer.runUntilOutput('/SRC/', 100000);
     computer.clearOutput();
 
-    // Check CUR_DIR after CD - should be 20 (entry index of SRC)
-    expect(computer.memory[CUR_DIR_LO]).toBe(20);  // SRC is entry 20
+    // Check CUR_DIR after CD - should be 22 (entry index of SRC)
+    expect(computer.memory[CUR_DIR_LO]).toBe(22);  // SRC is entry 22 (after AS.COM and TESTFWDL.ASM)
     expect(computer.memory[CUR_DIR_HI]).toBe(0);
 
     // Try to assemble HELLO.ASM in SRC directory
@@ -1035,9 +1023,6 @@ describe('ASM.COM Self-Hosting (task-11.5)', () => {
     // Debug: check CUR_DIR values
     console.log(`CUR_DIR: LO=${computer.memory[0x0240].toString(16)} HI=${computer.memory[0x0241].toString(16)}`);
 
-    // Enable debug reads for sector >= 300
-    computer.enableDebugReads();
-
     // Now try to assemble it
     computer.sendLine('ASM ASM.ASM');
 
@@ -1094,10 +1079,8 @@ describe('AS.COM Bootstrap Chain (task-8.1)', () => {
    * Test that AS.COM can assemble asm2.asm (bootstrap chain)
    * ASM2.ASM is in the SRC directory on the disk image
    *
-   * NOTE: Currently skipped - the native AS.COM fails with "Undefined symbol"
-   * on forward references with < > operators. The stage0 TypeScript assembler
-   * handles this correctly, so ASM2.COM is precompiled by stage0.
-   * TODO: Investigate why native AS.COM fails on asm2.asm forward refs
+   * This is a key test for the self-hosting assembler:
+   * AS.COM (Stage 1) assembles ASM2.ASM to produce ASM2.COM (Stage 2)
    */
   it('should assemble asm2.asm from SRC directory', async () => {
     const computer = new TestComputer();
@@ -1117,7 +1100,7 @@ describe('AS.COM Bootstrap Chain (task-8.1)', () => {
     computer.runUntilOutput('/>', 100000);
     computer.clearOutput();
 
-    // Install files
+    // Install files (copies 512 sectors from floppy to HDD)
     computer.sendLine('INSTALL');
     computer.runUntilOutput('Done', 500000);
     computer.clearOutput();
@@ -1140,102 +1123,33 @@ describe('AS.COM Bootstrap Chain (task-8.1)', () => {
       }
     }
 
-    console.log('AS ASM2.ASM output:', computer.output);
-
-    // Always dump some debug info
-    // FILESIZE = $5E (16-bit), FILESIZE_HI = $72 (16-bit), FILE_START = $68 (16-bit)
-    const filesize_lo = computer.memory[0x5e] | (computer.memory[0x5f] << 8);
-    const filesize_hi = computer.memory[0x72] | (computer.memory[0x73] << 8);
-    const filesize = filesize_lo | (filesize_hi << 16);
-    console.log(`FILESIZE: ${filesize} bytes (expected ~64712)`);
-
-    const FILE_START = computer.memory[0x68] | (computer.memory[0x69] << 8);
-    console.log(`FILE_START sector: ${FILE_START}`);
-
-    // If there's an error, dump debug info
-    if (computer.output.includes('Error')) {
-      console.log('PASS value:', computer.memory[0x38]);  // PASS is at $38
-      console.log('LINENUM:', computer.memory[0x3a] | (computer.memory[0x3b] << 8));
-
-      // Dump symbol table and search for BANNER
-      const SYM_TAB = 0x2400;
-      let bannerFound = false;
-      let symbolCount = 0;
-      console.log('Symbol table search for BANNER:');
-      for (let i = 0; i < 448; i++) {
-        const ptr = SYM_TAB + i * 16;
-        if (computer.memory[ptr] === 0) {
-          console.log(`  Symbol table ends at index ${i} (${symbolCount} symbols)`);
-          break;
-        }
-        symbolCount++;
-        const name = Array.from(computer.memory.slice(ptr, ptr + 8))
-          .map(b => b ? String.fromCharCode(b) : '.')
-          .join('');
-        const value = computer.memory[ptr + 8] | (computer.memory[ptr + 9] << 8);
-        const defined = computer.memory[ptr + 10];
-        if (name.startsWith('BANNER')) {
-          console.log(`  Found BANNER at index ${i}: "${name}" = $${value.toString(16).padStart(4, '0')} (defined=${defined})`);
-          bannerFound = true;
-        }
-      }
-      if (!bannerFound) {
-        console.log('  BANNER not found in symbol table!');
-      }
-      console.log(`Total symbols: ${symbolCount}`);
-
-      // Show last 5 symbols
-      console.log('Last 5 symbols (full 16 bytes):');
-      for (let i = Math.max(0, symbolCount - 5); i < symbolCount; i++) {
-        const ptr = SYM_TAB + i * 16;
-        const rawBytes = Array.from(computer.memory.slice(ptr, ptr + 16))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join(' ');
-        const name = Array.from(computer.memory.slice(ptr, ptr + 8))
-          .map(b => b >= 32 && b < 127 ? String.fromCharCode(b) : '.')
-          .join('');
-        const value = computer.memory[ptr + 8] | (computer.memory[ptr + 9] << 8);
-        const defined = computer.memory[ptr + 10];
-        console.log(`  ${i}: [${rawBytes}] "${name}" = $${value.toString(16).padStart(4, '0')} (defined=${defined})`);
-      }
-
-      // Also show entry 78 (the first empty slot after the last symbol)
-      const nextPtr = SYM_TAB + symbolCount * 16;
-      const nextRawBytes = Array.from(computer.memory.slice(nextPtr, nextPtr + 16))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join(' ');
-      console.log(`  ${symbolCount}: [${nextRawBytes}] (first empty slot)`);
-
-      // Check SRCPTR and streaming state
-      const srcPtr = computer.memory[0x60] | (computer.memory[0x61] << 8);
-      console.log(`SRCPTR: $${srcPtr.toString(16)}`);
-      console.log(`Content at SRCPTR: "${Array.from(computer.memory.slice(srcPtr, srcPtr + 40)).map(b => b >= 32 && b < 127 ? String.fromCharCode(b) : '.').join('')}"`);
-
-      // Check STREAM variables
-      const streamSec = computer.memory[0x6a] | (computer.memory[0x6b] << 8);
-      const streamLeft = computer.memory[0x6c] | (computer.memory[0x6d] << 8) |
-                         (computer.memory[0x6e] << 16) | (computer.memory[0x6f] << 24);
-      const streamEnd = computer.memory[0x70] | (computer.memory[0x71] << 8);
-      console.log(`STREAM_SEC: ${streamSec}, STREAM_LEFT: ${streamLeft}, STREAM_END: $${streamEnd.toString(16)}`);
-
-      // Check for null bytes in SRC_BUF area
-      const SRC_BUF = 0x2000;
-      console.log('Null bytes in SRC_BUF area:');
-      for (let i = 0; i < 0x400; i++) {
-        if (computer.memory[SRC_BUF + i] === 0) {
-          const context = Array.from(computer.memory.slice(SRC_BUF + i - 10, SRC_BUF + i + 10))
-            .map(b => b >= 32 && b < 127 ? String.fromCharCode(b) : '.')
-            .join('');
-          console.log(`  Null at $${(SRC_BUF + i).toString(16)}: "${context}"`);
-          if (i < 0x200) {
-            console.log(`  ^ This is BEFORE midpoint, might be premature EOF!`);
-          }
-        }
-      }
-    }
-
-    expect(computer.output).not.toContain('not found');
+    // Verify no errors
     expect(computer.output).not.toContain('Error');
     expect(computer.output).toContain('Assembly complete');
+
+    // Check ERRFLAG = 0 (no error)
+    const ERRFLAG = computer.memory[0x39];
+    expect(ERRFLAG).toBe(0);
+
+    // Check PASS = 2 (completed both passes)
+    const PASS = computer.memory[0x38];
+    expect(PASS).toBe(2);
+
+    // Check symbol count - asm2.asm has ~380+ symbols
+    const SYM_TAB = 0x2400;
+    let symCount = 0;
+    for (let i = 0; i < 448; i++) {
+      if (computer.memory[SYM_TAB + i * 16] === 0) break;
+      symCount++;
+    }
+    expect(symCount).toBeGreaterThan(350);
+
+    // Check output size from message "Assembly complete. XXXX bytes"
+    // Stage0 produces ~4894 bytes (0x131E)
+    const bytesMatch = computer.output.match(/Assembly complete\. ([0-9A-Fa-f]+) bytes/);
+    expect(bytesMatch).not.toBeNull();
+    const outputBytes = parseInt(bytesMatch![1], 16);
+    expect(outputBytes).toBeGreaterThan(4000);
+    expect(outputBytes).toBeLessThan(6000);
   }, 120000);
 });
