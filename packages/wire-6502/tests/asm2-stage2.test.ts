@@ -360,6 +360,85 @@ describe('ASM2 Stage 2 Assembler - Foundation (task-8.1)', () => {
   });
 });
 
+describe('ASM2 Bootstrap Chain (task-8.2)', () => {
+  // Test if ASM2 can assemble ASM.ASM (the Stage 1 assembler)
+  // This validates the bootstrap chain: stage0 → asm.asm → asm2.asm → asm.asm
+  //
+  // NOTE: This test is currently SKIPPED because ASM2 lacks source streaming.
+  // ASM.ASM is 79KB, but ASM2 only has an 8KB buffer. The streaming feature
+  // from ASM.ASM (STREAM_INIT, STREAM_REFILL) needs to be ported to ASM2.
+
+  it.skip('asm2 should assemble asm.asm from SRC directory (requires streaming)', async () => {
+    const computer = await setupComputer();
+
+    // CD to SRC directory where ASM.ASM lives
+    computer.sendLine('CD SRC');
+    const gotSrc = computer.runUntilOutput('/SRC/', 100000);
+    expect(gotSrc).toBe(true);
+    computer.clearOutput();
+
+    // Try to assemble ASM.ASM with ASM2
+    computer.sendLine('ASM2 ASM.ASM');
+
+    // Run for a while - this is a large file
+    const gotComplete = computer.runUntilOutput('Assembly complete', 10000000);
+
+    if (!gotComplete) {
+      // If it fails, print output for debugging
+      console.log('ASM2 ASM.ASM output:', computer.output.substring(0, 2000));
+    }
+
+    expect(gotComplete).toBe(true);
+    expect(computer.output).not.toContain('Error');
+
+    // Get asm2's output size
+    const bytesMatch = computer.output.match(/Assembly complete\. ([0-9A-Fa-f]+) bytes/);
+    expect(bytesMatch).not.toBeNull();
+    const outputBytes = parseInt(bytesMatch![1], 16);
+
+    // asm.asm should produce ~7000-8000 bytes (similar to stage0 output)
+    expect(outputBytes).toBeGreaterThan(6000);
+    expect(outputBytes).toBeLessThan(9000);
+
+    // Compare with stage0 output
+    const asmPath = path.join(__dirname, '../asm/asm.asm');
+    const asmSource = fs.readFileSync(asmPath, 'utf-8');
+    const stage0Result = assemble(asmSource);
+
+    // Output sizes should match exactly
+    expect(outputBytes).toBe(stage0Result.bytes.length);
+  }, 120000);
+});
+
+describe('ASM2 Indirect Modes Debug', () => {
+  it('stage0 should assemble indirect modes correctly', () => {
+    const source = `
+; Test indirect addressing modes
+        .ORG $0800
+PTR     = $60
+        LDA (PTR),Y
+        STA (PTR),Y
+        LDA (PTR,X)
+        STA (PTR,X)
+`;
+    const result = assemble(source);
+    console.log('stage0 indirect test:', result.bytes.length, 'bytes');
+    console.log('Hex:', Array.from(result.bytes).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    // LDA (PTR),Y = B1 60
+    // STA (PTR),Y = 91 60
+    // LDA (PTR,X) = A1 60
+    // STA (PTR,X) = 81 60
+    expect(result.bytes[0]).toBe(0xB1);
+    expect(result.bytes[1]).toBe(0x60);
+    expect(result.bytes[2]).toBe(0x91);
+    expect(result.bytes[3]).toBe(0x60);
+    expect(result.bytes[4]).toBe(0xA1);
+    expect(result.bytes[5]).toBe(0x60);
+    expect(result.bytes[6]).toBe(0x81);
+    expect(result.bytes[7]).toBe(0x60);
+  });
+});
+
 describe('ASM2 Test Files', () => {
   // These describe the test .ASM files that need to be created for testing
 

@@ -1,10 +1,10 @@
 ---
 id: task-8.1
 title: asm2 foundation - minimal assembler assembled by asm.asm
-status: In Progress
+status: Done
 assignee: []
 created_date: '2025-12-11 09:25'
-updated_date: '2025-12-11 17:56'
+updated_date: '2025-12-12 08:10'
 labels:
   - '6502'
   - assembler
@@ -34,11 +34,11 @@ Create the basic asm2 skeleton that can be assembled by asm.asm and assemble sim
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Tests written BEFORE implementation (TDD red-green-refactor)
-- [ ] #2 asm.asm successfully assembles asm2.asm
-- [ ] #3 asm2 can assemble simple test programs (NOP, LDA, STA, branches)
-- [ ] #4 Output matches stage0 assembler for identical input
-- [ ] #5 Error messages include line numbers
+- [x] #1 Tests written BEFORE implementation (TDD red-green-refactor)
+- [x] #2 asm.asm successfully assembles asm2.asm
+- [x] #3 asm2 can assemble simple test programs (NOP, LDA, STA, branches)
+- [x] #4 Output matches stage0 assembler for identical input
+- [x] #5 Error messages include line numbers
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -53,4 +53,16 @@ Create the basic asm2 skeleton that can be assembled by asm.asm and assemble sim
 **Issue Found:** Native AS.COM fails to assemble asm2.asm with "Undefined symbol at line $008C" error. This affects forward references with < > operators. The stage0 assembler handles this correctly, so ASM2.COM is precompiled by stage0 for now.
 
 TODO: Investigate why native AS.COM fails on asm2.asm forward refs
+
+## Progress (Dec 12)
+- Fixed INSTALL command to copy 512 sectors (was 255) - this was the root cause of AS.COM failing on asm2.asm
+- AS.COM now successfully assembles asm2.asm: 4894 bytes, 383 symbols
+- Merged fix to master
+
+## Completed (Dec 12)
+- All 11 ASM2 tests pass
+- Test files exist: TESTNOP.ASM, TESTLDA.ASM, TESTBR.ASM, TESTERR.ASM
+- ASM2.COM (precompiled) successfully assembles all test programs
+- Output matches stage0 assembler
+- Error messages include line numbers
 <!-- SECTION:NOTES:END -->
