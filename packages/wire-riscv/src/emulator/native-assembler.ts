@@ -72,6 +72,7 @@ export class NativeAssembler {
   private textOutput: number[] = [];
   private dataOutput: number[] = [];
   private currentSection: 'text' | 'data' = 'text';
+  private firstSection: 'text' | 'data' | null = null;
   private currentLine: number = 0;
   private sourceLines: string[] = [];
 
@@ -92,6 +93,7 @@ export class NativeAssembler {
     this.textOutput = [];
     this.dataOutput = [];
     this.currentSection = 'text';
+    this.firstSection = null;
     this.currentLine = 0;
 
     this.sourceLines = source.split('\n');
@@ -106,16 +108,13 @@ export class NativeAssembler {
       this.processLine(this.sourceLines[i]);
     }
 
-    // Concatenate data + text sections
-    this.output = [...this.dataOutput, ...this.textOutput];
-
-    // Adjust text labels by data section size
-    const dataSize = this.dataOutput.length;
-    const adjustedLabels = new Map<string, number>();
-    for (const [label, offset] of this.labels) {
-      adjustedLabels.set(label, offset);
+    // Concatenate sections in source order (default: text first)
+    if (this.firstSection === 'data') {
+      this.output = [...this.dataOutput, ...this.textOutput];
+    } else {
+      // text first (or no sections defined)
+      this.output = [...this.textOutput, ...this.dataOutput];
     }
-    this.labels = adjustedLabels;
 
     // Second pass: resolve pending labels
     for (const pending of this.pendingLabels) {
@@ -261,10 +260,19 @@ export class NativeAssembler {
     // Check for label
     const labelMatch = line.match(/^(\w+):\s*(.*)/);
     if (labelMatch) {
-      // Store label offset in the current section
-      const offset = this.currentSection === 'data'
-        ? this.dataOutput.length
-        : this.dataOutput.length + this.textOutput.length;
+      // Store label offset based on section and order
+      let offset: number;
+      if (this.firstSection === 'data') {
+        // Data comes first in output
+        offset = this.currentSection === 'data'
+          ? this.dataOutput.length
+          : this.dataOutput.length + this.textOutput.length;
+      } else {
+        // Text comes first in output (or no sections yet)
+        offset = this.currentSection === 'text'
+          ? this.textOutput.length
+          : this.textOutput.length + this.dataOutput.length;
+      }
       this.labels.set(labelMatch[1], offset);
       line = labelMatch[2].trim();
       if (!line) {
@@ -293,7 +301,15 @@ export class NativeAssembler {
    * Get current position in final output (accounting for sections)
    */
   private getCurrentPosition(): number {
-    return this.dataOutput.length + this.textOutput.length;
+    if (this.firstSection === 'data') {
+      return this.currentSection === 'data'
+        ? this.dataOutput.length
+        : this.dataOutput.length + this.textOutput.length;
+    } else {
+      return this.currentSection === 'text'
+        ? this.textOutput.length
+        : this.textOutput.length + this.dataOutput.length;
+    }
   }
 
   /**
@@ -310,10 +326,16 @@ export class NativeAssembler {
 
     switch (directive) {
       case '.text':
+        if (this.firstSection === null) {
+          this.firstSection = 'text';
+        }
         this.currentSection = 'text';
         break;
 
       case '.data':
+        if (this.firstSection === null) {
+          this.firstSection = 'data';
+        }
         this.currentSection = 'data';
         break;
 

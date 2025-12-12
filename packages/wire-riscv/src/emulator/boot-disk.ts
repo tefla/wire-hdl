@@ -14,6 +14,7 @@ import { NativeAssembler } from './native-assembler.js';
 import { ExecutableBuilder, ProgramLoader, EXECUTABLE_MAGIC, HEADER_SIZE } from './program-loader.js';
 import { Bootloader, BOOT_CONFIG } from './bootloader.js';
 import { TEXT_COLS, TEXT_ROWS } from './graphics.js';
+import editAsmSource from '../../asm/EDIT-SIMPLE.ASM?raw';
 
 /** Boot disk configuration */
 export const BOOT_DISK_CONFIG = {
@@ -459,6 +460,18 @@ done:   ADDI a7, zero, 0    ; EXIT
       .build();
     this.fs.createFile('ASM', 'BIN');
     this.fs.writeFile('ASM', 'BIN', asmExe);
+
+    // EDIT command - Full-screen MS-DOS-style text editor
+    // Uses full EDIT.ASM source with .text and .data sections
+    // Assembler now correctly handles section ordering
+    const editCode = asm.assemble(editAsmSource);
+
+    const editExe = new ExecutableBuilder()
+      .setCode(editCode)
+      .setStackSize(1024)
+      .build();
+    this.fs.createFile('EDIT', 'BIN');
+    this.fs.writeFile('EDIT', 'BIN', editExe);
   }
 
   /**
@@ -655,7 +668,7 @@ export class InteractiveSystem {
         if (this.fs) {
           const name = command.toUpperCase();
           if (this.fs.fileExists(name, 'BIN')) {
-            this.cmdRun([name], false); // Run quietly (no debug output)
+            this.cmdRun([name], false);
             return;
           }
         }
@@ -820,8 +833,34 @@ export class InteractiveSystem {
         this.println(`Entry point: 0x${loadInfo.entryPoint.toString(16)}`);
       }
 
+      // Clear previous console output to capture program output
+      const previousOutput = this.cpu.consoleOutput;
+      this.cpu.consoleOutput = '';
+
       // Run program
       const cycles = this.cpu.run(100000);
+
+      // Get program output and display it
+      const programOutput = this.cpu.consoleOutput;
+
+      // Debug logging
+      if (verbose) {
+        console.log(`Program ran ${cycles} cycles`);
+        console.log(`Program output length: ${programOutput.length}`);
+        console.log(`Program output: "${programOutput}"`);
+        console.log(`CPU halted: ${this.cpu.halted}`);
+        console.log(`Exit code: ${this.cpu.exitCode}`);
+      }
+
+      if (programOutput) {
+        // Print each character directly to screen
+        for (let i = 0; i < programOutput.length; i++) {
+          this.cpu.gpu.putcharWithCursor(programOutput.charCodeAt(i));
+        }
+      }
+
+      // Restore console output with program output included
+      this.cpu.consoleOutput = previousOutput + programOutput;
 
       if (verbose) {
         this.println(`Executed ${cycles} cycles`);
